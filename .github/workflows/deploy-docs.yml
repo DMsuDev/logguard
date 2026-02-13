@@ -69,41 +69,6 @@ jobs:
           retention-days: 7
 
   # ─────────────────────────────────────────────────────────────────
-  # Deploy to GitHub Pages
-  # ─────────────────────────────────────────────────────────────────
-  deploy-pages:
-    name: Deploy to GitHub Pages
-    runs-on: ubuntu-latest
-    needs: build-docs
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Download documentation
-        uses: actions/download-artifact@v4
-        with:
-          name: documentation
-          path: docs-output
-
-      - name: Upload pages artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: ./docs-output
-
-      - name: Add comment on PR (if applicable)
-        if: github.event_name == 'pull_request' && success()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: '📚 Documentation has been updated and published! View it at: ${{ steps.deployment.outputs.page_url }}'
-            })
-
-  # ─────────────────────────────────────────────────────────────────
   # Notify on Success
   # ─────────────────────────────────────────────────────────────────
   notify:
