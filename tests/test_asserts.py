@@ -27,7 +27,7 @@ from logguard.asserts import (
     _default_failure_handler,
     assertion_logger,
 )
-from logguard.exceptions import FatalAssertionError, ValidationError
+from logguard.exceptions import ValidationError
 
 
 class TestASSERTBasic:
@@ -43,25 +43,25 @@ class TestASSERTBasic:
         ASSERT([1, 2, 3])
 
     def test_assert_fails_on_false(self) -> None:
-        """Test that ASSERT raises FatalAssertionError when condition is false."""
-        with pytest.raises(FatalAssertionError):
+        """Test that ASSERT raises ValidationError when condition is false."""
+        with pytest.raises(ValidationError):
             ASSERT(False)
 
     def test_assert_with_message(self) -> None:
         """Test ASSERT with custom message."""
-        with pytest.raises(FatalAssertionError, match="Custom message"):
+        with pytest.raises(ValidationError, match="Custom message"):
             ASSERT(False, "Custom message")
 
     def test_assert_with_condition_and_message(self) -> None:
         """Test ASSERT with both condition and message."""
         x = -5
-        with pytest.raises(FatalAssertionError, match="Value must be positive"):
+        with pytest.raises(ValidationError, match="Value must be positive"):
             ASSERT(x > 0, "Value must be positive")
 
     def test_assert_captures_expression(self) -> None:
         """Test that ASSERT captures the expression from source."""
         x = 10
-        with pytest.raises(FatalAssertionError) as exc_info:
+        with pytest.raises(ValidationError) as exc_info:
             ASSERT(x < 5)
 
         # Expression should be captured in error message
@@ -71,7 +71,7 @@ class TestASSERTBasic:
     def test_assert_with_extra_context(self) -> None:
         """Test ASSERT with extra context dictionary."""
         x = 10
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(x < 5, "Value too large", extra={"value": x, "limit": 5})
 
     def test_assert_with_complex_expression(self) -> None:
@@ -84,13 +84,13 @@ class TestASSERTBasic:
         ASSERT(a in [1, 2, 3] or b in [4, 5, 6])
 
         # Should fail
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(a > b > c)
 
     def test_assert_logs_failure(self) -> None:
         """Test that ASSERT logs failure with context."""
         with patch.object(assertion_logger, "error") as mock_error:
-            with pytest.raises(FatalAssertionError):
+            with pytest.raises(ValidationError):
                 ASSERT(False, "Test failure")
 
             mock_error.assert_called()
@@ -104,7 +104,7 @@ class TestASSERTBasic:
         def check_valid() -> bool:
             return False
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(check_valid())
 
     def test_assert_with_truthy_values(self) -> None:
@@ -117,15 +117,15 @@ class TestASSERTBasic:
         ASSERT(object())
 
         # Falsy - should fail
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(0)
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT("")
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT([])
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT({})
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(None)
 
 
@@ -138,13 +138,13 @@ class TestEnforceFunction:
         enforce(5 > 2, "Math works")
 
     def test_enforce_fails_on_false(self) -> None:
-        """Test that enforce raises FatalAssertionError when condition is false."""
-        with pytest.raises(FatalAssertionError):
+        """Test that enforce raises ValidationError when condition is false."""
+        with pytest.raises(ValidationError):
             enforce(False, "Test failure")
 
     def test_enforce_with_explicit_context(self) -> None:
         """Test enforce with explicit context parameters."""
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             enforce(
                 False,
                 "Validation failed",
@@ -157,7 +157,7 @@ class TestEnforceFunction:
     def test_enforce_logs_context(self) -> None:
         """Test that enforce logs all context information."""
         with patch.object(assertion_logger, "error") as mock_error:
-            with pytest.raises(FatalAssertionError):
+            with pytest.raises(ValidationError):
                 enforce(
                     False,
                     "Test failure",
@@ -177,13 +177,13 @@ class TestEnforceFunction:
 
     def test_enforce_with_custom_exc_type(self) -> None:
         """Test enforce with custom exception type."""
-        # In debug mode, should still raise FatalAssertionError
-        with pytest.raises((FatalAssertionError, ValidationError)):
+        # In debug mode, should raise ValidationError
+        with pytest.raises(ValidationError):
             enforce(False, "Custom exc", exc_type=ValidationError)
 
     def test_enforce_with_extra_dict(self) -> None:
         """Test enforce with extra context dictionary."""
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             enforce(
                 False,
                 "Value out of range",
@@ -205,10 +205,10 @@ class TestASSERTHelpers:
 
     def test_assert_type_fails(self) -> None:
         """Test ASSERT_TYPE with incorrect types."""
-        with pytest.raises(FatalAssertionError, match="Expected type"):
+        with pytest.raises(ValidationError, match="Expected type"):
             ASSERT_TYPE(42, str)
 
-        with pytest.raises(FatalAssertionError, match="Expected type"):
+        with pytest.raises(ValidationError, match="Expected type"):
             ASSERT_TYPE("hello", int)
 
     def test_assert_type_multiple_types(self) -> None:
@@ -217,12 +217,12 @@ class TestASSERTHelpers:
         ASSERT_TYPE(3.14, (int, float))
         ASSERT_TYPE("hello", (str, bytes))
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_TYPE([], (int, str, float))
 
     def test_assert_type_custom_message(self) -> None:
         """Test ASSERT_TYPE with custom message."""
-        with pytest.raises(FatalAssertionError, match="Custom type error"):
+        with pytest.raises(ValidationError, match="Custom type error"):
             ASSERT_TYPE(42, str, "Custom type error")
 
     def test_assert_in_passes(self) -> None:
@@ -234,15 +234,15 @@ class TestASSERTHelpers:
 
     def test_assert_in_fails(self) -> None:
         """Test ASSERT_IN with item not in container."""
-        with pytest.raises(FatalAssertionError, match="not found"):
+        with pytest.raises(ValidationError, match="not found"):
             ASSERT_IN(5, [1, 2, 3])
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_IN("z", "hello world")
 
     def test_assert_in_custom_message(self) -> None:
         """Test ASSERT_IN with custom message."""
-        with pytest.raises(FatalAssertionError, match="Status invalid"):
+        with pytest.raises(ValidationError, match="Status invalid"):
             ASSERT_IN("invalid", ["active", "pending"], "Status invalid")
 
     def test_assert_not_empty_passes(self) -> None:
@@ -255,21 +255,21 @@ class TestASSERTHelpers:
 
     def test_assert_not_empty_fails(self) -> None:
         """Test ASSERT_NOT_EMPTY with empty objects."""
-        with pytest.raises(FatalAssertionError, match="empty"):
+        with pytest.raises(ValidationError, match="empty"):
             ASSERT_NOT_EMPTY([])
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NOT_EMPTY("")
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NOT_EMPTY({})
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NOT_EMPTY(0)
 
     def test_assert_not_empty_custom_message(self) -> None:
         """Test ASSERT_NOT_EMPTY with custom message."""
-        with pytest.raises(FatalAssertionError, match="No users found"):
+        with pytest.raises(ValidationError, match="No users found"):
             ASSERT_NOT_EMPTY([], "No users found")
 
     def test_assert_range_passes(self) -> None:
@@ -282,18 +282,18 @@ class TestASSERTHelpers:
 
     def test_assert_range_fails(self) -> None:
         """Test ASSERT_RANGE with values out of range."""
-        with pytest.raises(FatalAssertionError, match="not in range"):
+        with pytest.raises(ValidationError, match="not in range"):
             ASSERT_RANGE(15, 0, 10)
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_RANGE(-5, 0, 10)
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_RANGE(150, 0, 120)
 
     def test_assert_range_custom_message(self) -> None:
         """Test ASSERT_RANGE with custom message."""
-        with pytest.raises(FatalAssertionError, match="Age invalid"):
+        with pytest.raises(ValidationError, match="Age invalid"):
             ASSERT_RANGE(200, 0, 150, "Age invalid")
 
     def test_assert_equals_passes(self) -> None:
@@ -306,18 +306,18 @@ class TestASSERTHelpers:
 
     def test_assert_equals_fails(self) -> None:
         """Test ASSERT_EQUALS with unequal values."""
-        with pytest.raises(FatalAssertionError, match="Expected"):
+        with pytest.raises(ValidationError, match="Expected"):
             ASSERT_EQUALS(5, 10)
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_EQUALS("hello", "world")
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_EQUALS([1, 2], [1, 2, 3])
 
     def test_assert_equals_custom_message(self) -> None:
         """Test ASSERT_EQUALS with custom message."""
-        with pytest.raises(FatalAssertionError, match="Wrong status code"):
+        with pytest.raises(ValidationError, match="Wrong status code"):
             ASSERT_EQUALS(404, 200, "Wrong status code")
 
     def test_assert_none_passes(self) -> None:
@@ -328,21 +328,21 @@ class TestASSERTHelpers:
 
     def test_assert_none_fails(self) -> None:
         """Test ASSERT_NONE with non-None values."""
-        with pytest.raises(FatalAssertionError, match="Expected None"):
+        with pytest.raises(ValidationError, match="Expected None"):
             ASSERT_NONE(0)
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NONE("")
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NONE([])
 
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NONE(False)
 
     def test_assert_none_custom_message(self) -> None:
         """Test ASSERT_NONE with custom message."""
-        with pytest.raises(FatalAssertionError, match="Expected no error"):
+        with pytest.raises(ValidationError, match="Expected no error"):
             ASSERT_NONE("error", "Expected no error")
 
     def test_assert_not_none_passes(self) -> None:
@@ -356,16 +356,16 @@ class TestASSERTHelpers:
 
     def test_assert_not_none_fails(self) -> None:
         """Test ASSERT_NOT_NONE with None value."""
-        with pytest.raises(FatalAssertionError, match="Value is None"):
+        with pytest.raises(ValidationError, match="Value is None"):
             ASSERT_NOT_NONE(None)
 
         x = None
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT_NOT_NONE(x)
 
     def test_assert_not_none_custom_message(self) -> None:
         """Test ASSERT_NOT_NONE with custom message."""
-        with pytest.raises(FatalAssertionError, match="User not found"):
+        with pytest.raises(ValidationError, match="User not found"):
             ASSERT_NOT_NONE(None, "User not found")
 
 
@@ -414,8 +414,8 @@ class TestCustomFailureHandler:
         # Restore default
         set_failure_handler(_default_failure_handler)
 
-        # Should raise FatalAssertionError, not RuntimeError
-        with pytest.raises(FatalAssertionError):
+        # Should raise ValidationError, not RuntimeError
+        with pytest.raises(ValidationError):
             enforce(False, "test")
 
     def test_custom_handler_receives_all_context(self) -> None:
@@ -472,13 +472,13 @@ class TestEdgeCases:
 
             inner()
 
-        with pytest.raises(FatalAssertionError, match="Nested assertion"):
+        with pytest.raises(ValidationError, match="Nested assertion"):
             outer()
 
     def test_assert_in_lambda(self) -> None:
         """Test ASSERT behavior with lambda (edge case)."""
         # Lambda with assertion
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             (lambda: ASSERT(False, "Lambda assertion"))()
 
     def test_assert_with_side_effects(self) -> None:
@@ -505,33 +505,33 @@ class TestEdgeCases:
     def test_assert_with_very_long_message(self) -> None:
         """Test ASSERT with very long error message."""
         long_message = "x" * 1000
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(False, long_message)
 
     def test_assert_with_special_characters_in_message(self) -> None:
         """Test ASSERT with special characters in message."""
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(False, "Error: 'quote' and \"double\" and \n newline")
 
     def test_assert_with_unicode_in_message(self) -> None:
         """Test ASSERT with unicode characters in message."""
-        with pytest.raises(FatalAssertionError, match="Émoji"):
+        with pytest.raises(ValidationError, match="Émoji"):
             ASSERT(False, "Émoji test: 🚀 🎉 ñáéíó")
 
     def test_enforce_with_empty_message(self) -> None:
         """Test enforce with empty message uses fallback."""
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             enforce(False, "")
 
     def test_assert_with_none_extra(self) -> None:
         """Test ASSERT with extra=None (should auto-capture locals)."""
         # Auto-capture might work depending on implementation
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(False, "Test with locals")
 
     def test_assert_with_empty_extra(self) -> None:
         """Test ASSERT with empty extra dict."""
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             ASSERT(False, "Test", extra={})
 
 
@@ -552,11 +552,11 @@ class TestIntegrationScenarios:
         validate_user("John", 30, "john@example.com")
 
         # Invalid age
-        with pytest.raises(FatalAssertionError, match="Age out of valid range"):
+        with pytest.raises(ValidationError, match="Age out of valid range"):
             validate_user("John", 200, "john@example.com")
 
         # Invalid email
-        with pytest.raises(FatalAssertionError, match="Invalid email"):
+        with pytest.raises(ValidationError, match="Invalid email"):
             validate_user("John", 30, "invalid-email")
 
     def test_nested_assertions(self) -> None:
@@ -578,13 +578,13 @@ class TestIntegrationScenarios:
         assert level1(10) == 20
 
         # Fail at different levels
-        with pytest.raises(FatalAssertionError, match="Level 1"):
+        with pytest.raises(ValidationError, match="Level 1"):
             level1(-5)
 
-        with pytest.raises(FatalAssertionError, match="Level 2"):
+        with pytest.raises(ValidationError, match="Level 2"):
             level1(150)
 
-        with pytest.raises(FatalAssertionError, match="Level 3"):
+        with pytest.raises(ValidationError, match="Level 3"):
             level1(50)
 
     def test_assertions_in_loop(self) -> None:
@@ -596,7 +596,7 @@ class TestIntegrationScenarios:
 
         # With invalid value
         invalid_values = [1, 2, 100, 4, 5]
-        with pytest.raises(FatalAssertionError):
+        with pytest.raises(ValidationError):
             for value in invalid_values:
                 ASSERT_RANGE(value, 0, 10)
 
@@ -613,5 +613,5 @@ class TestIntegrationScenarios:
         with MockContext():
             ASSERT(True, "Should pass")
 
-        with pytest.raises(FatalAssertionError), MockContext():
+        with pytest.raises(ValidationError), MockContext():
             ASSERT(False, "Should fail in context")

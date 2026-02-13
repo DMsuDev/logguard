@@ -19,7 +19,6 @@ from logguard.exceptions import (
     ConfigurationError,
     DataFormatError,
     ExternalServiceError,
-    FatalAssertionError,
     MissingConfigError,
     OperationError,
     PermissionError,
@@ -184,10 +183,11 @@ class TestValidationError:
         assert isinstance(error, ValidationError)
         assert isinstance(error, AppBaseError)
 
-    def test_fatal_assertion_error(self) -> None:
-        """Test FatalAssertionError subclass."""
-        error = FatalAssertionError("Assertion failed", field="condition")
-        assert isinstance(error, ValidationError)
+    def test_validation_error_subclass(self) -> None:
+        """Test ValidationError with field information."""
+        error = ValidationError("Invalid input", field="email")
+        assert error.status_code == 422
+        assert error.context["field"] == "email"
         assert isinstance(error, AppBaseError)
 
 
@@ -336,7 +336,7 @@ class TestExceptionHierarchy:
             MissingConfigError("key"),
             ValidationError("test"),
             DataFormatError("test"),
-            FatalAssertionError("test"),
+            ValidationError("test"),
             ResourceNotFoundError("Type", 1),
             AuthenticationError("test"),
             PermissionError("test"),
@@ -356,10 +356,9 @@ class TestExceptionHierarchy:
         assert isinstance(data_error, ValidationError)
         assert isinstance(data_error, AppBaseError)
 
-        assertion_error = FatalAssertionError("test")
-        assert isinstance(assertion_error, FatalAssertionError)
-        assert isinstance(assertion_error, ValidationError)
-        assert isinstance(assertion_error, AppBaseError)
+        validation_error = ValidationError("test", field="email")
+        assert isinstance(validation_error, ValidationError)
+        assert isinstance(validation_error, AppBaseError)
 
     def test_operation_hierarchy(self) -> None:
         """Test OperationError inheritance hierarchy."""
