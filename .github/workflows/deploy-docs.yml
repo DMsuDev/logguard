@@ -47,7 +47,7 @@ jobs:
       - name: Generate documentation
         run: |
           mkdir -p ${{ env.ARTIFACTS_DIR }}/docs
-          pdoc logguard -o ${{ env.ARTIFACTS_DIR }}/docs --force
+          pdoc logguard -o ${{ env.ARTIFACTS_DIR }}/docs
           echo "Documentation generated at ${{ env.ARTIFACTS_DIR }}/docs"
 
       - name: Verify documentation
