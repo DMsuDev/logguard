@@ -1,6 +1,6 @@
 [project]
 name = "logguard"
-version = "0.1.0"
+version = "0.1.1"
 description = "Utilities for logging, assertions and custom exceptions"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -45,7 +45,7 @@ dev = [
 
 [project.urls]
 Homepage = "https://github.com/DMsuDev/logguard"
-Documentation = "https://logguard.readthedocs.io"   # Placeholder, update when docs are ready
+# Documentation = "https://logguard.readthedocs.io"   # Placeholder, update when docs are ready
 Repository = "https://github.com/DMsuDev/logguard"
 "Bug Tracker" = "https://github.com/DMsuDev/logguard/issues"
 
