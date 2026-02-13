@@ -11,7 +11,7 @@ AppBaseError
 ├── ValidationError             - data/input validation failures
 │   └── DataFormatError
 ├── ResourceError               - resources not found, permissions, etc.
-│   ├── FileNotFoundError       (may also inherit from OSError if applicable)
+│   ├── ResourceNotFoundError       (may also inherit from OSError if applicable)
 │   └── AuthenticationError
 ├── OperationError              - business logic / operation errors
 │   ├── RetryableError           can be retried (e.g., temporary network issues)
@@ -23,6 +23,8 @@ Advantages:
 - Easy to catch groups of errors: except AppBaseError
 - Useful messages and additional context
 - More precise logging and monitoring
+
+Note: You can expand this hierarchy with more specific exceptions as needed. Built-in exceptions are still in work.
 """
 
 from typing import Any, Optional, Union
@@ -132,7 +134,7 @@ class MissingConfigError(ConfigurationError):
 
 
 # ────────────────────────────────────────────────
-# Validation exceptions (works well with your asserts)
+# Validation exceptions (works well with asserts)
 # ────────────────────────────────────────────────
 
 
@@ -156,12 +158,6 @@ class ValidationError(AppBaseError):
 class DataFormatError(ValidationError):
     """Incorrect data format (malformed JSON, wrong type, etc.)."""
 
-    pass  # you can add more logic if needed
-
-
-class FatalAssertionError(ValidationError):
-    """Raised in debug mode or when fatal behavior is requested."""
-
     pass
 
 
@@ -170,7 +166,16 @@ class FatalAssertionError(ValidationError):
 # ────────────────────────────────────────────────
 
 
-class ResourceNotFoundError(AppBaseError):
+class ResourceError(AppBaseError):
+    """Base class for resource-related errors.
+
+    Includes access issues, missing resources, authentication, permissions, etc.
+    """
+
+    pass
+
+
+class ResourceNotFoundError(ResourceError):
     """Requested resource does not exist (file, DB record, user, etc.)."""
 
     def __init__(
@@ -186,15 +191,23 @@ class ResourceNotFoundError(AppBaseError):
         )
 
 
-class AuthenticationError(AppBaseError):
+class AuthenticationError(ResourceError):
     """Authentication / authorization failure."""
 
     def __init__(self, message: str = "Authentication failed", **kwargs: Any) -> None:
         super().__init__(message, context=kwargs, status_code=401)
 
 
-class PermissionError(AppBaseError):
-    """Permission denied for the requested operation."""
+class PermissionError(ResourceError):
+    """Permission denied for the requested operation.
+
+    Note: This is a custom exception class. Python also has a built-in
+    PermissionError for OS-level permission issues. Make sure to import
+    this from logguard.exceptions to avoid shadowing the built-in:
+
+        from logguard.exceptions import PermissionError  # Custom
+        # NOT: except PermissionError  (would be built-in)
+    """
 
     def __init__(self, message: str = "Permission denied", **kwargs: Any) -> None:
         super().__init__(message, context=kwargs, status_code=403)
@@ -224,6 +237,15 @@ class RetryableError(OperationError):
         super().__init__(message, context=context, status_code=503)
 
 
+class FatalOperationError(OperationError):
+    """Fatal operation error that cannot be recovered.
+
+    Indicates a critical failure in a business operation.
+    """
+
+    pass
+
+
 # ────────────────────────────────────────────────
 # External service errors
 # ────────────────────────────────────────────────
@@ -245,3 +267,24 @@ class ExternalServiceError(AppBaseError):
             **kwargs,
         }
         super().__init__(message, context=context, status_code=502)
+
+
+class RateLimitError(ExternalServiceError):
+    """Rate limit exceeded for an external service.
+
+    Typically returned by APIs with usage restrictions.
+    """
+
+    def __init__(
+        self,
+        service: str,
+        reset_time: Optional[int] = None,  # Unix timestamp when limit resets
+        **kwargs: Any,
+    ) -> None:
+        context = {"reset_time": reset_time, **kwargs}
+        super().__init__(
+            service=service,
+            message=f"Rate limit exceeded for {service}",
+            **context,
+        )
+        self.status_code = 429  # Too Many Requests
