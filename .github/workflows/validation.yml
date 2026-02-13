@@ -62,13 +62,6 @@ jobs:
       - name: Run tests with coverage
         run: pytest --cov=logguard --cov-report=xml --cov-report=term-missing
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}  # opcional, si usas Codecov
-          file: coverage.xml
-          fail_ci_if_error: true
-
   ci-summary:
     name: CI Summary
     runs-on: ubuntu-latest
