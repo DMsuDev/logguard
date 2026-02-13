@@ -65,12 +65,14 @@ def _default_failure_handler(
         context_dict = dict(extra)
 
     # Add assertion-specific context
-    context_dict.update({
-        "expression": expression,
-        "file": short_file,
-        "line": line,
-        "function": function,
-    })
+    context_dict.update(
+        {
+            "expression": expression,
+            "file": short_file,
+            "line": line,
+            "function": function,
+        }
+    )
 
     # Log the error in a single line for better scannability
     error_message = " ".join(main_parts) + extra_str

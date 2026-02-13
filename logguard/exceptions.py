@@ -24,7 +24,8 @@ Advantages:
 - Useful messages and additional context
 - More precise logging and monitoring
 
-Note: You can expand this hierarchy with more specific exceptions as needed. Built-in exceptions are still in work.
+Note: You can expand this hierarchy with more specific exceptions as needed.
+Built-in exceptions are still in work.
 """
 
 from typing import Any, Optional, Union

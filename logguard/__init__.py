@@ -60,7 +60,6 @@ if TYPE_CHECKING:  # pragma: no cover
 __version__: Final[str] = "0.1.0"
 
 __all__ = [
-    # Assertions & helpers
     "ASSERT",
     "ASSERT_EQUALS",
     "ASSERT_IN",
@@ -69,8 +68,8 @@ __all__ = [
     "ASSERT_NOT_NONE",
     "ASSERT_RANGE",
     "ASSERT_TYPE",
-    # Exceptions
     "AppBaseError",
+    "AppLogger",
     "AuthenticationError",
     "ConfigurationError",
     "DataFormatError",
@@ -84,9 +83,6 @@ __all__ = [
     "ResourceNotFoundError",
     "RetryableError",
     "ValidationError",
-    # Logger
-    "AppLogger",
-    # Submodules (explicit access)
     "asserts",
     "enforce",
     "exceptions",

@@ -180,7 +180,7 @@ class AppLogger:
         # Optionally add JSON-formatted logging (requires python-json-logger package)
         if json_logs:
             try:
-                from pythonjsonlogger.json import JsonFormatter  # type: ignore[import-not-found]
+                from pythonjsonlogger.json import JsonFormatter
 
                 json_file = str(log_path.with_suffix(".json"))
                 json_handler = RotatingFileHandler(
