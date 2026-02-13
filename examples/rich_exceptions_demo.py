@@ -3,7 +3,6 @@ Simple Banking System Demo - LogGuard Exceptions with Logger & Rich Formatting
 """
 
 from rich import print as rprint
-from rich.panel import Panel
 from rich.table import Table
 
 from logguard import AppLogger
@@ -139,4 +138,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
