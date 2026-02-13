@@ -1,5 +1,5 @@
 [project]
-name = "logguard"
+name = "py-logguard"
 version = "0.1.1"
 description = "Utilities for logging, assertions and custom exceptions"
 readme = "README.md"

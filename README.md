@@ -18,7 +18,7 @@ Logguard provides a powerful yet simple logging configuration system with rich f
 ## Installation
 
 ```bash
-pip install logguard
+pip install py-logguard
 ```
 
 For development with optional dependencies:
