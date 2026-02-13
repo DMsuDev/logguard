@@ -1,0 +1,125 @@
+name: Deploy Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "logguard/**"
+      - ".github/workflows/deploy-docs.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+env:
+  PYTHON_VERSION: "3.12"
+  ARTIFACTS_DIR: build
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────
+  # Build Documentation
+  # ─────────────────────────────────────────────────────────────────
+  build-docs:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Generate documentation
+        run: |
+          mkdir -p ${{ env.ARTIFACTS_DIR }}/docs
+          pdoc logguard -o ${{ env.ARTIFACTS_DIR }}/docs --force
+          echo "Documentation generated at ${{ env.ARTIFACTS_DIR }}/docs"
+
+      - name: Verify documentation
+        run: |
+          if [ ! -d "${{ env.ARTIFACTS_DIR }}/docs" ]; then
+            echo "ERROR: Documentation not generated!"
+            exit 1
+          fi
+          if [ ! -f "${{ env.ARTIFACTS_DIR }}/docs/index.html" ]; then
+            echo "WARNING: No index.html found, creating redirect..."
+            mkdir -p "${{ env.ARTIFACTS_DIR }}/docs"
+          fi
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation
+          path: ${{ env.ARTIFACTS_DIR }}/docs
+          retention-days: 7
+
+  # ─────────────────────────────────────────────────────────────────
+  # Deploy to GitHub Pages
+  # ─────────────────────────────────────────────────────────────────
+  deploy-pages:
+    name: Deploy to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: build-docs
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Download documentation
+        uses: actions/download-artifact@v4
+        with:
+          name: documentation
+          path: docs-output
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./docs-output
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+      - name: Add comment on PR (if applicable)
+        if: github.event_name == 'pull_request' && success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '📚 Documentation has been updated and published! View it at: ${{ steps.deployment.outputs.page_url }}'
+            })
+
+  # ─────────────────────────────────────────────────────────────────
+  # Notify on Success
+  # ─────────────────────────────────────────────────────────────────
+  notify:
+    name: Notify Success
+    runs-on: ubuntu-latest
+    needs: [build-docs, deploy-pages]
+    if: success() && github.event_name == 'push'
+    steps:
+      - name: Success notification
+        run: |
+          echo "✓ Documentation successfully built and deployed!"
+          echo "URL: ${{ needs.deploy-pages.outputs.page_url }}"
