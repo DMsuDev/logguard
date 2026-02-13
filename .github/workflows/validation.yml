@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - "logguard/**"
+      - "examples/**"
       - ".github/workflows/validation.yml"
   pull_request:
     paths:
       - "logguard/**"
+      - "examples/**"
       - ".github/workflows/validation.yml"
     branches: [main]
   workflow_dispatch:
