@@ -8,8 +8,8 @@ Provides:
 
 Integrates:
 - AppLogger for detailed logging
-- custom exceptions (ValidationError / FatalAssertionError)
-- different behavior in __debug__ vs production
+- custom exceptions (ValidationError)
+- raises ValidationError with rich context information
 """
 
 import inspect
@@ -17,7 +17,7 @@ import traceback
 from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
-from .exceptions import AppBaseError, FatalAssertionError, ValidationError
+from .exceptions import AppBaseError, ValidationError
 from .logger import AppLogger
 
 # Dedicated logger for assertions (easy to filter/rotate/monitor)
@@ -42,8 +42,8 @@ def _default_failure_handler(
     """Default handler for assertion failures.
 
     - Logs the failure with context in a compact format.
-    - Raises FatalAssertionError in debug mode.
-    - Only logs in production mode.
+    - In debug mode: captures traceback and raises ValidationError
+    - In production mode: only logs the error
     """
     short_file = Path(filename).name
     location = f"{short_file}:{line} in {function}()"
@@ -58,27 +58,38 @@ def _default_failure_handler(
 
     # Add extra context if provided (sorted for consistency)
     extra_str = ""
+    context_dict = {}
     if extra:
         extra_parts = [f"{k}={v!r}" for k, v in sorted(extra.items())]
         extra_str = " | " + " ".join(extra_parts)
+        context_dict = dict(extra)
+
+    # Add assertion-specific context
+    context_dict.update({
+        "expression": expression,
+        "file": short_file,
+        "line": line,
+        "function": function,
+    })
 
     # Log the error in a single line for better scannability
-    assertion_logger.error(" ".join(main_parts) + extra_str)
+    error_message = " ".join(main_parts) + extra_str
+    assertion_logger.error(error_message)
 
-    # In debug mode: raise fatal exception with clean traceback
+    # In debug mode: capture traceback and raise exception
     if __debug__:
         try:
             # Capture traceback excluding internals
             stack = traceback.format_stack(limit=10)[:-3]
             tb_str = "".join(stack).rstrip()
-            assertion_logger.debug("Assertion traceback (clean):\n%s", tb_str)
+            assertion_logger.debug("Assertion traceback:\n%s", tb_str)
         except Exception:
-            assertion_logger.debug("Failed to capture clean traceback")
+            assertion_logger.debug("Failed to capture traceback")
 
-        raise FatalAssertionError(" ".join(main_parts) + extra_str) from None
+        raise ValidationError(error_message, context=context_dict) from None
 
-    # In production: optional soft raise (commented; configure as needed)
-    # raise ValidationError(message, context={...})
+    # In production mode: only log, no exception (optional - configure as needed)
+    # Optionally: raise ValidationError(error_message, context=context_dict) from None
 
 
 # Global failure handler
@@ -495,5 +506,4 @@ __all__ = [
     "ASSERT_NOT_NONE",
     # Exceptions
     "ValidationError",
-    "FatalAssertionError",
 ]
