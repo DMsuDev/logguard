@@ -3,7 +3,13 @@ name: Validation (CI)
 on:
   push:
     branches: [main]
+    paths:
+      - "logguard/**"
+      - ".github/workflows/validation.yml"
   pull_request:
+    paths:
+      - "logguard/**"
+      - ".github/workflows/validation.yml"
     branches: [main]
   workflow_dispatch:
 
