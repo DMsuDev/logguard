@@ -309,6 +309,7 @@ Check the `examples/` directory for complete examples:
 - `basic_usage.py` - Basic logging and assertions
 - `advanced_asserts.py` - Advanced assertion patterns
 - `test_improvements.py` - Using logguard in tests
+- `rich_exceptions_demo.py` - Rich-formatted exceptions & logger exceptions in a simple banking system simulator
 
 ## Development
 
