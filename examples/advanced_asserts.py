@@ -5,7 +5,7 @@ Shows:
 - Multiple custom exception types
 - ASSERT with additional context (extra)
 - Cascading error handling
-- Configuration, resource, and external service exceptions
+- Configuration, resource, and validation exceptions
 - Structured logging with enriched context
 """
 
@@ -14,13 +14,11 @@ from typing import Any
 
 from logguard import ASSERT, AppLogger
 from logguard.exceptions import (
-    AuthenticationError,
     ConfigurationError,
-    ExternalServiceError,
+    ForbiddenError,
     MissingConfigError,
-    OperationError,
+    ResourceError,
     ResourceNotFoundError,
-    RetryableError,
     ValidationError,
 )
 
@@ -110,10 +108,12 @@ class DatabaseService:
         import random
 
         if random.random() < 0.3:  # 30% chance of failure
-            raise ExternalServiceError(
-                service="PostgreSQL",
-                message="Failed to connect to the database",
-                original_exc=ConnectionError("Connection timeout"),
+            raise ResourceError(
+                "Failed to connect to the database",
+                context={
+                    "service": "PostgreSQL",
+                    "reason": "Connection timeout",
+                },
             )
 
         self._connected = True
@@ -165,10 +165,12 @@ class AuthService:
         ASSERT(len(token) > 0, "Token must not be empty")
 
         if token not in self._valid_tokens:
-            raise AuthenticationError(
+            raise ForbiddenError(
                 "Invalid or expired token",
-                token_prefix=token[:10],
-                reason="Token not found in valid tokens",
+                context={
+                    "token_prefix": token[:10],
+                    "reason": "Token not found in valid tokens",
+                },
             )
 
         self.logger.info("Successful authentication", extra={"token_prefix": token[:10]})
@@ -205,11 +207,13 @@ class PaymentProcessor:
                 import random
 
                 if random.random() < 0.5 and attempt < self.max_retries:
-                    raise RetryableError(
+                    raise ValidationError(
                         "Payment service temporarily unavailable",
-                        retry_after=2,
-                        attempt=attempt,
-                        max_retries=self.max_retries,
+                        context={
+                            "retry_after": 2,
+                            "attempt": attempt,
+                            "max_retries": self.max_retries,
+                        },
                     )
 
                 # Success
@@ -224,11 +228,12 @@ class PaymentProcessor:
                     "attempts": attempt,
                 }
 
-            except RetryableError as e:
+            except ValidationError as e:
                 self.logger.warning(f"Retry {attempt}: {e}")
                 if attempt == self.max_retries:
-                    raise OperationError(
+                    raise ResourceError(
                         f"Payment failed after {self.max_retries} attempts",
+                        context={"attempts": self.max_retries},
                     ) from e
                 time.sleep(e.context.get("retry_after", 1))
 
@@ -297,21 +302,17 @@ def run_full_flow() -> None:
         logger.error(f"Configuration error: {e}", extra=e.context)
         print(f"\n[ERROR] Invalid configuration: {e}")
 
-    except AuthenticationError as e:
-        logger.error(f"Authentication error: {e}", extra=e.context)
-        print(f"\n[ERROR] Authentication failed: {e}")
+    except ForbiddenError as e:
+        logger.error(f"Permission error: {e}", extra=e.context)
+        print(f"\n[ERROR] Access denied: {e}")
 
     except ResourceNotFoundError as e:
         logger.error(f"Resource not found: {e}", extra=e.context)
         print(f"\n[ERROR] Resource not found: {e}")
 
-    except ExternalServiceError as e:
-        logger.error(f"External service error: {e}", extra=e.context)
-        print(f"\n[ERROR] External service unavailable: {e}")
-
-    except OperationError as e:
-        logger.error(f"Operation error: {e}", extra=e.context)
-        print(f"\n[ERROR] Operation failed: {e}")
+    except ResourceError as e:
+        logger.error(f"Resource error: {e}", extra=e.context)
+        print(f"\n[ERROR] Resource operation failed: {e}")
 
     except ValidationError as e:
         logger.error(f"Validation error: {e}", extra=e.context)

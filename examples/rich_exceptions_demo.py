@@ -7,7 +7,7 @@ from rich.table import Table
 
 from logguard import AppLogger
 from logguard.exceptions import (
-    AuthenticationError,
+    ForbiddenError,
     ResourceNotFoundError,
     ValidationError,
 )
@@ -46,9 +46,9 @@ class Bank:
                 field="credentials",
             )
         if password != "secret123":
-            raise AuthenticationError(
+            raise ForbiddenError(
                 message=f"Invalid password for {username}",
-                username=username,
+                context={"username": username},
             )
         return True
 
@@ -104,10 +104,10 @@ def main() -> None:
         show_rich_exception(e)
 
     # 2. Logger captures exception
-    rprint("[bold]Scenario 2: Authentication Error (with logger.exception)[/bold]")
+    rprint("[bold]Scenario 2: Permission Error (with logger.exception)[/bold]")
     try:
         bank.login("alice", "wrongpass")
-    except AuthenticationError:
+    except ForbiddenError:
         logger.exception("Invalid credentials")
 
     # 3. Rich formatted not found
