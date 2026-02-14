@@ -14,8 +14,9 @@ Integrates:
 
 import inspect
 import traceback
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 from .exceptions import AppBaseError, ValidationError
 from .logger import AppLogger
@@ -88,7 +89,7 @@ def _default_failure_handler(
         except Exception:
             assertion_logger.debug("Failed to capture traceback")
 
-        raise ValidationError(error_message, context=context_dict) from None
+    raise ValidationError(error_message, context=context_dict) from None
 
     # In production mode: only log, no exception (optional - configure as needed)
     # Optionally: raise ValidationError(error_message, context=context_dict) from None
@@ -112,7 +113,7 @@ def enforce(
     filename: str = "<unknown file>",
     line: int = 0,
     function: str = "<unknown function>",
-    extra: Optional[dict[str, Any]] = None,
+    extra: dict[str, Any] | None = None,
     exc_type: type[AppBaseError] = ValidationError,
 ) -> None:
     """Explicitly checks a condition and calls the failure handler if it fails.
@@ -147,106 +148,14 @@ def enforce(
                 "function": function,
                 **extra,
             },
-        )
-
-
-def _split_captured_args(captured: str) -> tuple[str, str]:
-    """Attempts to split the captured arguments into condition and message.
-
-    Assumes the message is the last positional argument if it's a string literal.
-    Handles simple cases but may not cover complex expressions or keyword args.
-
-    Returns:
-        (condition_str, message_str) - message_str is empty if no valid split.
-    """
-    if "," not in captured:
-        return captured, ""
-
-    # Split from the right, assuming last part is message
-    parts = captured.rsplit(",", maxsplit=1)
-    cond_part = parts[0].strip()
-    msg_part = parts[1].strip()
-
-    # Check if msg_part is a string literal (basic check)
-    if (msg_part.startswith('"') and msg_part.endswith('"')) or (
-        msg_part.startswith("'") and msg_part.endswith("'")
-    ):
-        message = msg_part[1:-1]  # Strip quotes
-        return cond_part, message
-
-    # No valid message split (e.g., keyword args or complex)
-    return captured, ""
-
-
-def extract_assert_arg(lines: list[str]) -> Optional[str]:
-    """Extracts the arguments inside the last ASSERT(...) call from the code context.
-
-    This is a best-effort parser to capture the expression for better logs.
-    Handles common cases but may fail on complex or multi-line expressions.
-    """
-    if not lines:
-        return None
-
-    full_src = "".join(lines).strip()
-    if not full_src:
-        return None
-
-    # Find positions of "ASSERT(" (skipping likely strings/comments)
-    positions = []
-    i = 0
-    while True:
-        pos = full_src.find("ASSERT(", i)
-        if pos == -1:
-            break
-
-        # Basic filter for comments/strings
-        before = full_src[max(0, pos - 20) : pos]
-        last_line = before.split("\n")[-1]
-        if "#" in last_line or (before.count('"') % 2 == 1) or (before.count("'") % 2 == 1):
-            i = pos + 7
-            continue
-
-        positions.append(pos)
-        i = pos + 7
-
-    if not positions:
-        return None
-
-    # Use the last position
-    start = positions[-1]
-    i = start + 7
-    depth = 1
-    while i < len(full_src) and depth > 0:
-        ch = full_src[i]
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-        i += 1
-
-    if depth != 0:
-        # Fallback for unclosed (multi-line?)
-        line_start = full_src.rfind("\n", 0, start) + 1
-        line_end = full_src.find("\n", start)
-        if line_end == -1:
-            line_end = len(full_src)
-        candidate = full_src[line_start:line_end].strip()
-        if candidate.startswith("ASSERT("):
-            return candidate[7:].rstrip(")").strip()
-        return None
-
-    # Extract inner content
-    captured = full_src[start + 7 : i - 1].strip()
-
-    # Remove trailing comments
-    return captured.split("#", 1)[0].rstrip()
+        ) from None
 
 
 def ASSERT(
     condition: bool,
     message: str = "",
     *,
-    extra: Optional[dict[str, Any]] = None,
+    extra: dict[str, Any] | None = None,
     exc_type: type[AppBaseError] = ValidationError,
 ) -> None:
     """Assertion with automatic source capture for expression and location.
@@ -272,7 +181,7 @@ def ASSERT(
         extra: Additional context to include in logs/exceptions.
         exc_type: Exception type to raise on failure.
     """
-    if bool(condition):
+    if condition:
         return
 
     frame = inspect.currentframe()
@@ -351,12 +260,102 @@ def ASSERT(
     )
 
 
+def _split_captured_args(captured: str) -> tuple[str, str]:
+    """Attempts to split the captured arguments into condition and message.
+
+    Assumes the message is the last positional argument if it's a string literal.
+    Handles simple cases but may not cover complex expressions or keyword args.
+
+    Returns:
+        (condition_str, message_str) - message_str is empty if no valid split.
+    """
+    if "," not in captured:
+        return captured, ""
+
+    # Split from the right, assuming last part is message
+    parts = captured.rsplit(",", maxsplit=1)
+    cond_part = parts[0].strip()
+    msg_part = parts[1].strip()
+
+    # Check if msg_part is a string literal (basic check)
+    if (msg_part.startswith('"') and msg_part.endswith('"')) or (msg_part.startswith("'") and msg_part.endswith("'")):
+        message = msg_part[1:-1]  # Strip quotes
+        return cond_part, message
+
+    # No valid message split (e.g., keyword args or complex)
+    return captured, ""
+
+
+def extract_assert_arg(lines: list[str]) -> str | None:
+    """Extracts the arguments inside the last ASSERT(...) call from the code context.
+
+    This is a best-effort parser to capture the expression for better logs.
+    Handles common cases but may fail on complex or multi-line expressions.
+    """
+    if not lines:
+        return None
+
+    full_src = "".join(lines).strip()
+    if not full_src:
+        return None
+
+    # Find positions of "ASSERT(" (skipping likely strings/comments)
+    positions = []
+    i = 0
+    while True:
+        pos = full_src.find("ASSERT(", i)
+        if pos == -1:
+            break
+
+        # Basic filter for comments/strings
+        before = full_src[max(0, pos - 20) : pos]
+        last_line = before.split("\n")[-1]
+        if "#" in last_line or (before.count('"') % 2 == 1) or (before.count("'") % 2 == 1):
+            i = pos + 7
+            continue
+
+        positions.append(pos)
+        i = pos + 7
+
+    if not positions:
+        return None
+
+    # Use the last position
+    start = positions[-1]
+    i = start + 7
+    depth = 1
+    while i < len(full_src) and depth > 0:
+        ch = full_src[i]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        i += 1
+
+    if depth != 0:
+        # Fallback for unclosed (multi-line?)
+        line_start = full_src.rfind("\n", 0, start) + 1
+        line_end = full_src.find("\n", start)
+        if line_end == -1:
+            line_end = len(full_src)
+        candidate = full_src[line_start:line_end].strip()
+        if candidate.startswith("ASSERT("):
+            return candidate[7:].rstrip(")").strip()
+        return None
+
+    # Extract inner content
+    captured = full_src[start + 7 : i - 1].strip()
+
+    # Remove trailing comments
+    return captured.split("#", 1)[0].rstrip()
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Convenient assertion helpers
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-def ASSERT_TYPE(obj: Any, expected_type: Union[type, tuple[type, ...]], message: str = "") -> None:
+def ASSERT_TYPE(obj: Any, expected_type: type | tuple[type, ...], message: str = "") -> None:
     """Assert that obj is an instance of expected_type.
 
     Args:
@@ -364,14 +363,12 @@ def ASSERT_TYPE(obj: Any, expected_type: Union[type, tuple[type, ...]], message:
         expected_type: Expected type or tuple of types.
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_TYPE(user_id, int)
         ASSERT_TYPE(data, (dict, list), "Data must be dict or list")
     """
     type_names = (
-        expected_type.__name__
-        if isinstance(expected_type, type)
-        else " or ".join(t.__name__ for t in expected_type)
+        expected_type.__name__ if isinstance(expected_type, type) else " or ".join(t.__name__ for t in expected_type)
     )
     default_msg = f"Expected type {type_names}, got {type(obj).__name__}"
     ASSERT(
@@ -389,7 +386,7 @@ def ASSERT_IN(item: Any, container: Any, message: str = "") -> None:
         container: Container to check in.
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_IN(status, ["active", "pending", "closed"])
         ASSERT_IN("user_id", request.json)
     """
@@ -408,7 +405,7 @@ def ASSERT_NOT_EMPTY(obj: Any, message: str = "") -> None:
         obj: Object to check.
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_NOT_EMPTY(users, "No users found")
         ASSERT_NOT_EMPTY(username)
     """
@@ -421,9 +418,9 @@ def ASSERT_NOT_EMPTY(obj: Any, message: str = "") -> None:
 
 
 def ASSERT_RANGE(
-    value: Union[int, float],
-    min_val: Union[int, float],
-    max_val: Union[int, float],
+    value: int | float,
+    min_val: int | float,
+    max_val: int | float,
     message: str = "",
 ) -> None:
     """Assert that value is within [min_val, max_val] range.
@@ -434,7 +431,7 @@ def ASSERT_RANGE(
         max_val: Maximum allowed value (inclusive).
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_RANGE(age, 0, 150)
         ASSERT_RANGE(temperature, -273.15, 1000)
     """
@@ -454,7 +451,7 @@ def ASSERT_EQUALS(actual: Any, expected: Any, message: str = "") -> None:
         expected: Expected value.
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_EQUALS(response.status_code, 200)
         ASSERT_EQUALS(len(results), 5, "Should return 5 results")
     """
@@ -473,7 +470,7 @@ def ASSERT_NONE(obj: Any, message: str = "") -> None:
         obj: Object to check.
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_NONE(error, "Unexpected error occurred")
     """
     default_msg = f"Expected None, got {type(obj).__name__}"
@@ -487,25 +484,8 @@ def ASSERT_NOT_NONE(obj: Any, message: str = "") -> None:
         obj: Object to check.
         message: Custom error message.
 
-    Example:
+    Usage:
         ASSERT_NOT_NONE(user, "User not found")
     """
     default_msg = "Value is None"
     ASSERT(obj is not None, message or default_msg, extra={"value": obj})
-
-
-__all__ = [
-    "ASSERT",
-    "enforce",
-    "set_failure_handler",
-    # Helpers
-    "ASSERT_TYPE",
-    "ASSERT_IN",
-    "ASSERT_NOT_EMPTY",
-    "ASSERT_RANGE",
-    "ASSERT_EQUALS",
-    "ASSERT_NONE",
-    "ASSERT_NOT_NONE",
-    # Exceptions
-    "ValidationError",
-]
