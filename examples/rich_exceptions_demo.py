@@ -75,14 +75,14 @@ def show_rich_exception(exc: Exception) -> None:
     table.add_column("Property", style="cyan")
     table.add_column("Value", style="yellow")
 
-    if hasattr(exc, "message"):
-        table.add_row("Message", str(exc.message))
+    message = str(exc).strip()
+    if message:
+        table.add_row("Message", message)
 
-    if hasattr(exc, "status_code"):
-        table.add_row("Status", f"[bold]{exc.status_code}[/bold]")
-
-    if hasattr(exc, "context"):
-        for key, value in exc.context.items():
+    # Context (if available)
+    context = getattr(exc, "context", None)
+    if isinstance(context, dict):
+        for key, value in context.items():
             table.add_row(key, str(value))
 
     rprint(table)
