@@ -20,7 +20,6 @@ import logging
 import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional, Union
 
 try:
     from rich.console import Console
@@ -62,12 +61,12 @@ class AppLogger:
     @classmethod
     def setup(
         cls,
-        log_file: Optional[str] = None,
-        console_level: Union[str, int] = logging.INFO,
-        file_level: Union[str, int] = logging.DEBUG,
+        log_file: str | None = None,
+        console_level: str | int = logging.INFO,
+        file_level: str | int = logging.DEBUG,
         json_logs: bool = os.getenv("JSON_LOGS", "false").lower() == "true",
-        max_bytes: Optional[int] = None,
-        backup_count: Optional[int] = None,
+        max_bytes: int | None = None,
+        backup_count: int | None = None,
         force: bool = False,
     ) -> None:
         """Configure the Python logging system with sensible defaults.
@@ -92,7 +91,7 @@ class AppLogger:
         max_bytes = max_bytes or cls.DEFAULT_MAX_BYTES
         backup_count = backup_count or cls.DEFAULT_BACKUP_COUNT
 
-        def resolve_level(value: Union[str, int], default: int) -> int:
+        def resolve_level(value: str | int, default: int) -> int:
             """Convert log level string or int to int, falling back to default if invalid."""
             if isinstance(value, int):
                 return value
@@ -101,9 +100,7 @@ class AppLogger:
                 if isinstance(lv, int):
                     return lv
             # Fallback to default if level is invalid
-            logging.warning(
-                "Invalid log level %r. Falling back to %s", value, logging.getLevelName(default)
-            )
+            logging.warning("Invalid log level %r. Falling back to %s", value, logging.getLevelName(default))
             return default
 
         console_level = resolve_level(console_level, logging.INFO)
@@ -119,8 +116,7 @@ class AppLogger:
             has_file_handler = any(isinstance(h, RotatingFileHandler) for h in root.handlers)
             # Console handler can be RichHandler or StreamHandler (but not RotatingFileHandler)
             has_console_handler = any(
-                isinstance(h, logging.StreamHandler) and not isinstance(h, RotatingFileHandler)
-                for h in root.handlers
+                isinstance(h, logging.StreamHandler) and not isinstance(h, RotatingFileHandler) for h in root.handlers
             )
             # If we already have both handlers, don't add duplicates
             if has_file_handler and has_console_handler:
@@ -224,7 +220,7 @@ class AppLogger:
         cls._configured = True
 
     @classmethod
-    def get_logger(cls, name: Optional[str] = None, auto_name: bool = True) -> logging.Logger:
+    def get_logger(cls, name: str | None = None, auto_name: bool = True) -> logging.Logger:
         """Get or create a logger with the given name.
 
         If name is None and auto_name is True, automatically uses the caller's module name.
@@ -256,9 +252,9 @@ class AppLogger:
     @classmethod
     def set_level(
         cls,
-        level: Union[str, int],
+        level: str | int,
         handler_type: str = "all",
-        logger_name: Optional[str] = None,
+        logger_name: str | None = None,
     ) -> None:
         """Dynamically change log level without reconfiguring.
 
@@ -284,9 +280,7 @@ class AppLogger:
 
         elif handler_type == "console":
             for handler in target_logger.handlers:
-                if isinstance(handler, logging.StreamHandler) and not isinstance(
-                    handler, RotatingFileHandler
-                ):
+                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RotatingFileHandler):
                     handler.setLevel(level)
 
         elif handler_type == "file":
@@ -295,9 +289,7 @@ class AppLogger:
                     handler.setLevel(level)
 
         else:
-            logging.warning(
-                "Invalid handler_type %r. Use 'all', 'console', or 'file'.", handler_type
-            )
+            logging.warning("Invalid handler_type %r. Use 'all', 'console', or 'file'.", handler_type)
 
     @classmethod
     def reset(cls) -> None:
