@@ -1,351 +1,304 @@
 # Logguard
 
-**Structured logging and assertion utilities for Python**
+[![Python](https://img.shields.io/badge/Language-Python-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
+[![Supported Python Versions](https://img.shields.io/pypi/pyversions/py-logguard)](https://pypi.org/project/py-logguard/)
+[![PyPI](https://img.shields.io/pypi/v/py-logguard?style=flat&logo=pypi&logoColor=white)](https://pypi.org/project/py-logguard/)
 
-Logguard provides a powerful yet simple logging configuration system with rich formatting support, automatic file rotation, and assertion utilities that capture context automatically.
+![Status](https://img.shields.io/badge/Status-Stable-success?style=flat)
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
-## Features
+Logguard is a lightweight logging and assertion library designed to make it easy to capture rich context and structured logs in Python applications. It provides a simple API for logging with automatic source capture, flexible configuration, and a semantic exception hierarchy.
 
-- **🔧 Easy Configuration**: Set up logging in one line with `AppLogger`
-- **📝 File Rotation**: Automatic log rotation with configurable size and backup count
-- **🎨 Rich Console Output**: Beautiful console logs with [Rich](https://github.com/Textualize/rich) support
-- **📊 JSON Logging**: Optional structured JSON output for log aggregation systems
-- **✅ Smart Assertions**: `ASSERT` and `enforce` with automatic source capture and logging
-- **🎯 Semantic Exceptions**: Clear exception hierarchy (`ValidationError`, `ConfigurationError`, etc.)
-- **⚡ Fast Startup**: Lazy imports for minimal performance impact
-- **🔇 Library Silencing**: Automatically suppresses noisy third-party library logs
+It is built on top of the `logging` and `rich` libraries for enhanced logging capabilities.
+
+## ⭐ Features
+
+- **Easy Configuration**: Set up logging in one line with `AppLogger`
+- **File Rotation**: Automatic log rotation with configurable size and backup count
+- **Rich Console Output**: Beautiful console logs with [Rich](https://github.com/Textualize/rich) support
+- **JSON Logging**: Optional structured JSON output for log aggregation systems
+- **Smart Assertions**: `ASSERT` and `enforce` with automatic source capture and logging
+- **Semantic Exceptions**: Clear exception hierarchy (`ValidationError`, `ConfigurationError`, etc.)
+- **Fast Startup**: Lazy imports for minimal performance impact
+- **Library Silencing**: Automatically suppresses noisy third-party library logs
 
 ## Installation
 
+Install with pip or your favorite PyPI package manager.
+
 ```bash
-pip install py-logguard
+python -m pip install py-logguard
 ```
 
 For development with optional dependencies:
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install py-logguard[dev]
 ```
 
 For JSON logging support:
 
 ```bash
-pip install -e ".[json]"
+python -m pip install py-logguard[json]
 ```
 
-## Quick Start
+## 🚩 Quick Start
 
-### Basic Logging
+<details>
+<summary>Logging</summary>
+
+Logguard provides a simple way to configure logging with sensible defaults. Just call `setup()` once and you're ready to go.
 
 ```python
 from logguard import AppLogger
 
-# Configure logging (optional - auto-configures on first use)
-AppLogger.setup(
-    log_file="logs/app.log",
-    console_level="INFO",
-    file_level="DEBUG"
-)
-
-# Get a logger
+AppLogger.setup(log_file="logs/app.log", console_level="INFO")
 logger = AppLogger.get_logger(__name__)
 
-# Use it
 logger.info("Application started")
-logger.debug("Debug information")
-logger.warning("Warning message")
+logger.debug("Debug info")
+logger.warning("Warning")
 logger.error("Error occurred")
 ```
 
-### Assertions with Context
+Logging will output to both console and file, with automatic rotation when files get too large.
+
+</details>
+
+<details>
+<summary>Assertions</summary>
+
+Use `ASSERT` to validate conditions while automatically capturing context like file, line, function, and the expression itself.
 
 ```python
-from logguard import ASSERT, AppLogger
+from logguard import ASSERT
 from logguard.exceptions import ValidationError
 
-logger = AppLogger().get_logger("validation_example")
-
-def process_user(name: str, age: int) -> dict:
-    # ASSERT captures context automatically:
-    # - Expression from source code
-    # - Filename, line number, function name
-    # - Local variables (optional)
+def validate_user(name: str, age: int):
     ASSERT(bool(name), "Name cannot be empty")
     ASSERT(len(name) >= 2, "Name must have at least 2 characters")
-    ASSERT(age >= 0, "Age cannot be negative")
+    ASSERT(age >= 0, "Age must be positive")
     ASSERT(age <= 150, "Age seems unrealistic")
 
-    return {"name": name, "age": age, "valid": True}
-
-# Assertions raise ValidationError on failure
 try:
-    process_user("", 25)
+    validate_user("", 25)
 except ValidationError as e:
     logger.error(f"Validation failed: {e}")
 ```
 
-### Manual Assertions with `enforce`
+When an assertion fails, logguard logs the full context and raises a `ValidationError` with rich details for debugging.
 
-For cases where you need explicit control over assertion parameters, use `enforce`:
+</details>
+
+<details>
+<summary>Specialized Assertions</summary>
+
+Logguard includes helpers for common validation patterns:
 
 ```python
-from logguard import enforce
+from logguard import (
+    ASSERT_TYPE, ASSERT_NOT_NONE, ASSERT_NOT_EMPTY,
+    ASSERT_IN, ASSERT_RANGE, ASSERT_EQUALS
+)
 
-# enforce() requires you to provide all context manually
-enforce(
-    condition=value > 0,
-    message="Value must be positive",
-    expression="value > 0",
-    filename=__file__,
-    line=10,
-    function="my_function",
-    extra={"value": value}
+ASSERT_TYPE(user, dict, "Expected a dictionary")
+ASSERT_NOT_NONE(email, "Email is required")
+ASSERT_NOT_EMPTY(name, "Name cannot be empty")
+ASSERT_IN(status, ["active", "inactive"], "Invalid status")
+ASSERT_RANGE(age, 0, 150, "Age out of range")
+ASSERT_EQUALS(total, 100, "Total must be 100")
+```
+
+These functions provide cleaner, more readable assertions for specific use cases.
+
+</details>
+
+<details>
+<summary>Custom Exceptions</summary>
+
+Logguard provides a semantic exception hierarchy for clearer error handling:
+
+```python
+from logguard.exceptions import (
+    ValidationError, ConfigurationError, ResourceNotFoundError
+)
+
+# Validation errors (from ASSERT failures)
+raise ValidationError("Invalid input", field="email")
+
+# Configuration errors
+raise ConfigurationError("Invalid config", file_path="config.json")
+
+# Resource errors
+raise ResourceNotFoundError("User", identifier=123)
+```
+
+All exceptions include rich context information accessible via `.to_dict()` for logging.
+
+</details>
+
+<details>
+<summary>JSON Logging</summary>
+
+For production environments, enable JSON logs for structured log aggregation:
+
+```python
+from logguard import AppLogger
+
+AppLogger.setup(json_logs=True)
+logger = AppLogger.get_logger(__name__)
+
+logger.info("User logged in", extra={"user_id": 123})
+logger.error("Database error", extra={"error_code": "DB_001"})
+```
+
+Enable via environment variable: `export JSON_LOGS=true`
+
+Requires: `pip install py-logguard[json]`
+
+</details>
+
+<br>
+
+> See the `examples/` folder for more complete demonstrations.
+
+## 📚 API Reference
+
+<details>
+<summary><strong>AppLogger</strong> - Logging Configuration & Management</summary>
+
+`AppLogger` is the main interface for logging. Configure it once and get loggers throughout your application.
+
+**Setup:**
+
+```python
+AppLogger.setup(
+    log_file="logs/app.log",      # Path to log file
+    console_level="INFO",          # Console output level
+    file_level="DEBUG",            # File output level
+    json_logs=False,               # Enable JSON formatting
+    max_bytes=5_000_000,           # Max file size before rotation (bytes)
+    backup_count=3,                # Number of rotated backups to keep
+    force=False                    # 'True' will override existing handlers
 )
 ```
 
-### Custom Exceptions
+**Methods:**
+
+- `get_logger(name: str | None = None)` - Get or create a logger instance
+- `set_level(level: str, handler_type: str = "all")` - Dynamically change log level ("console", "file", or "all")
+- `reset()` - Reset configuration (useful for testing)
+
+**Example:**
+
+```python
+AppLogger.setup(log_file="logs/app.log")
+logger = AppLogger.get_logger(__name__)
+logger.info("Starting application")
+AppLogger.set_level("DEBUG")  # Change all handlers to DEBUG
+```
+
+</details>
+
+<details>
+<summary><strong>Assertions</strong> - Validation with Auto-Context</summary>
+
+Assertions validate conditions and automatically capture context (file, line, function, expression) for debugging.
+
+**Basic:**
+
+- `ASSERT(condition, message="")` - Validate condition, auto-captures source context
+- `enforce(condition, message, expression, filename, line, function, extra=None)` - Manual assertion with explicit context
+
+**Specialized:**
+
+```python
+ASSERT_TYPE(value, dict, "Expected dictionary")          # Type checking
+ASSERT_NOT_NONE(email, "Email required")                 # Non-None check
+ASSERT_NOT_EMPTY(name, "Name cannot be empty")           # Non-empty check
+ASSERT_IN(status, ["active", "inactive"], "Invalid")     # Membership check
+ASSERT_RANGE(age, 18, 65, "Age out of range")            # Range check
+ASSERT_EQUALS(count, 5, "Expected 5 items")              # Equality check
+```
+
+**Configuration:**
+
+```python
+from logguard import set_failure_handler
+
+def custom_handler(message, expression, filename, line, function, extra):
+    # Handle assertion failure your way
+    print(f"Failed: {expression} at {filename}:{line}")
+
+set_failure_handler(custom_handler)
+```
+
+**On Failure:**
+
+- Logs the assertion details with context
+- Raises `ValidationError` with full debugging information
+
+</details>
+
+<details>
+<summary><strong>Exceptions</strong> - Semantic Error Hierarchy</summary>
+
+All exceptions inherit from `AppBaseError` and include rich context information.
+
+**Properties:**
+
+- `message` - Error description
+- `context` - Additional context data (dict)
+- `.to_dict()` - Serialize to dictionary for logging
+
+**Hierarchy:**
+
+```txt
+AppBaseError
+├── ConfigurationError
+│   └── MissingConfigError
+├── ValidationError              (raised by ASSERT)
+└── ResourceError
+    ├── ResourceNotFoundError
+    └── ForbiddenError
+```
+
+**Usage Examples:**
 
 ```python
 from logguard.exceptions import (
     ValidationError,
     ConfigurationError,
     ResourceNotFoundError,
-    AuthenticationError,
-    ExternalServiceError
 )
 
-# Use semantic exceptions for clearer error handling
-def load_config(path: str):
-    if not os.path.exists(path):
-        raise ConfigurationError(f"Config file not found: {path}")
-
-# Catch resource errors
-try:
-    get_user(user_id)
-except ResourceNotFoundError as e:
-    logger.error(f"User not found: {e}")
-
-# External service error handling
-try:
-    # Your code that calls an external API
-    api_call(...)
-except ExternalServiceError as e:
-    logger.error(f"Service error: {e}")
-```
-
-## Advanced Usage
-
-### Logger Configuration Options
-
-```python
-AppLogger.setup(
-    log_file="logs/myapp.log",      # Path to log file
-    console_level="INFO",             # Console log level
-    file_level="DEBUG",               # File log level
-    json_logs=False,                  # Enable JSON formatting
-    max_bytes=5_000_000,              # Max file size (5MB)
-    backup_count=3,                   # Number of backup files
-    force=False                       # Force reconfiguration
-)
-```
-
-### Dynamic Log Level Changes
-
-```python
-# Change log level at runtime
-AppLogger.set_level("DEBUG", handler_type="console")
-AppLogger.set_level("WARNING", handler_type="file")
-AppLogger.set_level("INFO", handler_type="all")
-```
-
-### Auto-detection of Logger Name
-
-```python
-# Automatically uses the module name
-logger = AppLogger.get_logger()  # Uses __name__ of calling module
-
-# Or explicitly specify
-logger = AppLogger.get_logger("myapp.services")
-```
-
-### JSON Logging for Production
-
-```python
-import os
-
-from logguard.logger import AppLogger
-
-# Enable JSON logs via environment variable
-os.environ["JSON_LOGS"] = "true"
-
-# Or directly in setup
-AppLogger.setup(json_logs=True)
-
-logger = AppLogger().get_logger("example")
-logger.info("This is an info message with JSON formatting!")
-logger.error("This is an error message with JSON formatting!")
-
-# Installed via: pip install -e ".[json]" or pip install python-json-logger>=2.0
-```
-
-## Exception Hierarchy
-
-Logguard provides a semantic exception hierarchy for clearer error handling:
-
-- **`AppBaseError`** - Base exception for all logguard errors
-- **`ValidationError`** - Data validation failures (raised by ASSERT)
-- **`ConfigurationError`** - Configuration or setup issues
-- **`ResourceError`** - Base for resource-related errors
-  - **`ResourceNotFoundError`** - Requested resource doesn't exist
-  - **`AuthenticationError`** - Authentication/authorization failed
-  - **`PermissionError`** - Permission denied
-- **`OperationError`** - Business operation failures
-- **`ExternalServiceError`** - External service failures
-  - **`RateLimitError`** - Rate limit exceeded
-
-## API Reference
-
-### AppLogger
-
-**Setup Method:**
-
-```python
-AppLogger.setup(
-    log_file: str | None = None,
-    console_level: str = "INFO",
-    file_level: str = "DEBUG", 
-    json_logs: bool = False,
-    max_bytes: int = 5_000_000,
-    backup_count: int = 3,
-    force: bool = False
-) -> None
-```
-
-**Main Methods:**
-
-- `setup(...)` - Configure the logging system
-- `get_logger(name: str | None = None)` - Get or create a logger instance
-- `set_level(level: str, handler_type: str = "all")` - Change log level dynamically
-- `reset()` - Reset logging configuration (useful for testing)
-
-### Assertions
-
-**Basic Assertions:**
-
-- `ASSERT(condition, message="")` - Raise `ValidationError` if condition is False (auto-captures expression, file, line)
-- `enforce(condition, message="", ...)` - Explicit assertion (requires manual parameters: expression, filename, line, function)
-
-**Specialized Assertions:**
-
-- `ASSERT_TYPE(value, expected_type, message="")` - Assert value is of expected type
-- `ASSERT_NOT_NONE(value, message="")` - Assert value is not None
-- `ASSERT_NOT_EMPTY(value, message="")` - Assert string/collection is not empty
-- `ASSERT_IN(value, collection, message="")` - Assert value is in collection
-- `ASSERT_RANGE(value, min_val, max_val, message="")` - Assert value is in range
-- `ASSERT_EQUALS(actual, expected, message="")` - Assert values are equal
-
-**Configuration:**
-
-- `set_failure_handler(handler)` - Custom handler for assertion failures
-
-### Exceptions
-
-All exceptions inherit from `AppBaseError` and include:
-- `message` - Description of the error
-- `context` - Additional context data (dict)
-- `status_code` - Suggested HTTP status code
-- `to_dict()` - Serialize exception to dictionary
-
-**Exception Classes:**
-
-```
-AppBaseError (base for all)
-├── ConfigurationError
-│   └── MissingConfigError
-├── ValidationError
-│   └── DataFormatError
-├── ResourceError
-│   ├── ResourceNotFoundError
-│   ├── AuthenticationError
-│   └── PermissionError (custom exception - see note below)
-├── OperationError
-│   ├── RetryableError
-│   └── FatalOperationError
-└── ExternalServiceError
-    └── RateLimitError
-```
-
-**Note on PermissionError:** Logguard provides a custom `PermissionError` exception for application-level permission errors. This is distinct from Python's built-in `PermissionError` (used for OS-level errors). Always import explicitly from logguard to use this exception.
-
-**Usage Examples:**
-
-```python
 # Configuration errors
 raise ConfigurationError("Invalid config", file_path="config.json")
 raise MissingConfigError("DATABASE_URL", source=".env")
 
 # Validation errors
-raise ValidationError("Invalid input", field="email")
-raise DataFormatError("Malformed JSON")
+raise ValidationError("Invalid email", field="email", value="invalid")
 
 # Resource errors
 raise ResourceNotFoundError("User", identifier=123)
-raise AuthenticationError("Invalid credentials")
-raise PermissionError("Access denied")
+raise ForbiddenError("Access denied for user", user_id=456)
 
-# Operation errors
-raise RetryableError("Network timeout", retry_after=5)
-raise FatalOperationError("Critical failure")
-
-# External service errors
-raise ExternalServiceError("API", "Service unavailable")
-raise RateLimitError("GitHub", reset_time=1234567890)
+# Serialize for logging
+try:
+    raise ValidationError("Invalid input", field="username")
+except ValidationError as e:
+    logger.exception(f"Error details: {e.to_dict()}")
 ```
 
-## Examples
+</details>
 
-Check the `examples/` directory for complete examples:
+## 🤝 Contributing
 
-- `basic_usage.py` - Basic logging and assertions
-- `advanced_asserts.py` - Advanced assertion patterns
-- `test_improvements.py` - Using logguard in tests
-- `rich_exceptions_demo.py` - Rich-formatted exceptions & logger exceptions in a simple banking system simulator
+Contributions, issues and feature requests are welcome. </br>
+Feel free to check the issues page.
 
-## Development
+## 📜 License
 
-```bash
-# Install development dependencies
-pip install -e ".[dev]"
+[![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
-# Run tests
-pytest
-
-# Run tests with coverage
-pytest --cov=logguard --cov-report=html
-
-# Format code (use Ruff formatter)
-ruff format .
-
-# Auto-fix lintable issues
-ruff check --fix .
-
-# Type checking
-mypy logguard/
-
-# Lint
-ruff check .
-```
-
-## Requirements
-
-- Python 3.9+
-- Optional: `rich` for beautiful console output
-- Optional: `python-json-logger` for JSON formatting
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
+Happy coding! ❤️
