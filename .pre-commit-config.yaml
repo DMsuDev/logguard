@@ -1,0 +1,42 @@
+# Pre-commit hooks configuration for logguard
+# See https://pre-commit.com for more information
+# See https://pre-commit.com/hooks.html for more hooks
+
+repos:
+  # General file checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-added-large-files
+      - id: check-merge-conflict
+      - id: debug-statements
+      - id: mixed-line-ending
+
+  # Ruff linting and formatting
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      # Run the linter.
+      - id: ruff-check
+      # Automatically fix issues where possible.
+        args: [--fix]
+      # Run the formatter.
+      - id: ruff-format
+        types_or: [ python, pyi ]
+      # Exclude the examples and tests directories from linting and formatting.
+        exclude: "(examples|tests)/"
+
+  # MyPy type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.19.1
+    hooks:
+      - id: mypy
+        additional_dependencies:
+          - rich
+          - python-json-logger
+          - pytest
+        args: [--config-file=pyproject.toml]
+        exclude: "(examples|tests)/"
