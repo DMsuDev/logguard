@@ -1,0 +1,21 @@
+name: Codespell
+
+on: [pull_request, push]
+
+jobs:
+  codespell:
+    name: Check for spelling errors
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Codespell
+        run: python3 -m pip install codespell
+
+      - name: Run Codespell
+        run: |
+          codespell \
+            --ignore-words-list="ba,fo,hel,revered,womens" \
+            --skip="./README.*.md,*.svg,*.ai,./benchmarks/snippets.py,./tests,./tools,*.lock"
