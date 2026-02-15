@@ -50,7 +50,7 @@ if TYPE_CHECKING:  # pragma: no cover
     )
     from .logger import AppLogger
 
-__version__: Final[str] = "0.1.0"
+__version__: Final[str] = "0.2.0"
 
 __all__ = [
     "ASSERT",
