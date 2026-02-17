@@ -47,15 +47,19 @@ class AppLogger:
         logger = AppLogger.get_logger(__name__)
         logger.info("This is an info message")
 
-    If setup() is not called, the first call to get_logger() will configure
-    logging with default settings.
+    Note:
+        - get_logger() can be called at any time (before or after setup).
+          Loggers created before setup() will start working once setup()
+          configures the root logger, thanks to Python's log propagation.
+        - setup() only runs once per process. Subsequent calls are ignored
+          with a warning. Use reset() + setup() to reconfigure.
     """
 
-    DEFAULT_LOG_FILE = "app.log"
-    DEFAULT_MAX_BYTES = 5_000_000
-    DEFAULT_BACKUP_COUNT = 3
+    DEFAULT_LOG_FILE: str = "app.log"
+    DEFAULT_MAX_BYTES: int = 5_000_000
+    DEFAULT_BACKUP_COUNT: int = 3
 
-    _configured = False
+    _configured: bool = False
 
     @classmethod
     def setup(
@@ -66,14 +70,13 @@ class AppLogger:
         json_logs: bool = False,
         max_bytes: int | None = None,
         backup_count: int | None = None,
-        force: bool = False,
         delay: bool = True,
     ) -> None:
         """Configure the Python logging system with sensible defaults.
 
         Sets up file rotation (RotatingFileHandler), console output with beautiful
         rich formatting, and optional JSON log output. Silences noisy libraries.
-        Only runs once unless force=True.
+        Only runs once per process. Use reset() + setup() to reconfigure.
 
         Args:
             log_file: Path to log file (default: 'app.log').
@@ -82,28 +85,24 @@ class AppLogger:
             json_logs: Enable JSON-formatted logging (requires python-json-logger).
             max_bytes: Max file size before rotation (default: 5MB).
             backup_count: Number of backup files to keep (default: 3).
-            force: If True, clear existing handlers and re-apply configuration (useful in tests or after fork/exec)
             delay: If True, delay file creation until the first log message (default: True).
         """
-        if cls._configured and not force:
+        if cls._configured:
+            logging.getLogger().warning(
+                "AppLogger.setup() called but logging is already configured. "
+                "Call AppLogger.reset() first if you need to reconfigure."
+            )
             return
 
         log_file = log_file or cls.DEFAULT_LOG_FILE
         max_bytes = max_bytes or cls.DEFAULT_MAX_BYTES
         backup_count = backup_count or cls.DEFAULT_BACKUP_COUNT
 
-        console_level = cls._resolve_level(console_level, logging.INFO)
-        file_level = cls._resolve_level(file_level, logging.DEBUG)
+        console_level = cls._resolve_level(console_level)
+        file_level = cls._resolve_level(file_level)
 
         root = logging.getLogger()
-
-        # Clear existing handlers if force=True
-        if force:
-            root.handlers.clear()
-        elif cls._already_configured(root):
-            cls._configured = True
-            return
-
+        root.handlers.clear()
         root.setLevel(logging.DEBUG)  # The handlers will filter
 
         log_path: Path = Path(log_file)
@@ -135,27 +134,31 @@ class AppLogger:
         cls._configured = True
 
     @staticmethod
-    def _already_configured(root: logging.Logger) -> bool:
-        """Check if logging is already configured with our handlers to avoid duplicates."""
-        has_file = any(isinstance(h, RotatingFileHandler) for h in root.handlers)
-        # Console handler will be a RichHandler or StreamHandler (but not RotatingFileHandler)
-        has_console = any(
-            isinstance(h, (RichHandler, logging.StreamHandler)) and not isinstance(h, RotatingFileHandler)
-            for h in root.handlers
-        )
-        # If we already have both handlers, we consider it configured
-        return has_file and has_console
+    def _resolve_level(value: str | int) -> int:
+        """Convert log level string or int to int, validating it's a recognized level.
 
-    @staticmethod
-    def _resolve_level(value: str | int, default: int) -> int:
-        """Convert log level string or int to int, falling back to default if invalid."""
+        Falls back to DEBUG if the level is invalid.
+        Valid levels: 0 (NOTSET), 10 (DEBUG), 20 (INFO), 30 (WARNING), 40 (ERROR), 50 (CRITICAL).
+        """
+        valid_levels = {logging.NOTSET, logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL}
+
+        default_level: int = logging.DEBUG
+
         if isinstance(value, int):
-            return value
+            if value in valid_levels:
+                return value
+            logging.warning("Invalid log level %r. Must be one of %s. Falling back to DEBUG", value, valid_levels)
+            return default_level
+
         if isinstance(value, str):
-            return getattr(logging, value.upper(), default)
-        # Fallback to default if level is invalid
-        logging.warning("Invalid log level %r. Falling back to %s", value, logging.getLevelName(default))
-        return default
+            resolved = getattr(logging, value.upper(), None)
+            if isinstance(resolved, int) and resolved in valid_levels:
+                return resolved
+            logging.warning("Invalid log level %r. Falling back to DEBUG", value)
+            return default_level
+
+        logging.warning("Invalid log level type %r. Falling back to DEBUG", type(value).__name__)
+        return default_level
 
     @classmethod
     def _create_file_handler(
@@ -256,6 +259,9 @@ class AppLogger:
             max_bytes: Max file size before rotation.
             backup_count: Number of backup files to keep.
             delay: If True, delay file creation until the first log message (default: True).
+
+        Returns:
+            Configured logging.Handler instance or None if JSON logging is unavailable.
         """
         if not JSON_LOGGER_AVAILABLE or JsonFormatter is None:
             return None
@@ -297,10 +303,7 @@ class AppLogger:
             "urllib3",
             "openai",
         ]
-        rel_modules: list[str] | None = modules if modules is not None else default_noisy
-
-        if rel_modules is None:
-            return
+        rel_modules: list[str] = modules if modules is not None else default_noisy
 
         for mod in rel_modules:
             logging.getLogger(mod).setLevel(logging.WARNING)
@@ -310,8 +313,9 @@ class AppLogger:
     def get_logger(cls, name: str | None = None, auto_name: bool = True) -> logging.Logger:
         """Get or create a logger with the given name.
 
-        If name is None and auto_name is True, automatically uses the caller's module name.
-        Calls setup() with default settings if logging has not been configured yet.
+        Can be called before or after setup(). Loggers created before setup()
+        will automatically use the root logger's handlers once setup() runs,
+        thanks to Python's built-in log propagation.
 
         Args:
             name: Logger name. If None and auto_name=True, uses the calling module's name.
@@ -320,9 +324,6 @@ class AppLogger:
         Returns:
             A logging.Logger instance.
         """
-        if not cls._configured:
-            cls.setup()
-
         if name is None and auto_name:
             try:
                 import inspect
