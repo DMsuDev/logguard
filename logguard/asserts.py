@@ -1,491 +1,675 @@
 """
-Assertion system with rich context, logging, and customizable failure handling.
+Advanced Assertion System for LogGuard.
 
-Provides:
-- ASSERT(condition, message="")          - macro-style with automatic capture
-- enforce(condition, message, ...)       - explicit version (no auto capture)
-- set_failure_handler(handler)           - customize behavior
+Environment-aware, extensible and closed for modification.
 
-Integrates:
-- AppLogger for detailed logging
-- custom exceptions (ValidationError)
-- raises ValidationError with rich context information
+This module provides a flexible assertion system that adapts its behavior
+based on the application environment (development vs production).
+
+Assertion Types:
+    CHECK   -> Always raises (fatal) - use for critical invariants
+    ASSERT  -> Raises in development, ignored in production - use for debugging
+    ENSURE  -> Raises in development, logs in production - use for preconditions
+    VERIFY  -> Always evaluated, raises in dev, logs in prod - use for postconditions
+
+Specialized helpers (all use ASSERT behavior):
+    ASSERT_NOT_NULL         -> Validates value is not None
+    ASSERT_NULL             -> Validates value is None
+    ASSERT_IN_RANGE         -> Validates value is within inclusive range [min, max]
+    ASSERT_BETWEEN_EXCLUSIVE -> Validates value is within exclusive range (min, max)
+    ASSERT_GREATER          -> Validates a > b
+    ASSERT_LESS             -> Validates a < b
+    ASSERT_EQUALS           -> Validates actual == expected
+    ASSERT_TYPE             -> Validates isinstance(value, expected)
+    ASSERT_NOT_EMPTY        -> Validates value is truthy (not empty)
+    ASSERT_IN               -> Validates item is in container
+
+Example:
+    >>> from logguard.asserts import ASSERT, CHECK, AssertionManager
+    >>> AssertionManager.configure(AssertionConfig(environment="development"))
+    >>> CHECK(user is not None, "User required", user_id=123)
+    >>> ASSERT(age > 0, "Age must be positive", age=age)
+
+Configuration:
+    Set APP_ENV environment variable to control behavior:
+    - "development", "dev", "local", "test" -> Development mode (raises)
+    - "production", "prod" -> Production mode (logs only for ENSURE/VERIFY)
 """
 
-import inspect
-import traceback
+from __future__ import annotations
+
+import os
 from collections.abc import Callable
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
-from .exceptions import ValidationError
+from .exceptions import (
+    AssertFailure,
+    ComparisonError,
+    EmptyError,
+    EqualsError,
+    MembershipError,
+    NullError,
+    RangeError,
+    TypeErrorAssert,
+)
 from .logger import AppLogger
 
-# Dedicated logger for assertions (easy to filter/rotate/monitor)
-assertion_logger = AppLogger.get_logger("assertions")
-
-# Type alias for the failure handler
-FailureHandler = Callable[[str, str, str, int, str, dict[str, Any]], None]
-
-# Constants for assertion context capture
-MAX_LOCALS_CAPTURED = 5  # Maximum number of local variables to capture
-MAX_VAR_VALUE_LENGTH = 100  # Maximum length of stringified variable value
+# ════════════════════════════════════════════════════════════════════════
+# Configuration
+# ════════════════════════════════════════════════════════════════════════
 
 
-def _default_failure_handler(
+@dataclass(frozen=True)
+class AssertionConfig:
+    """
+    Configuration for the assertion system.
+
+    Attributes:
+        environment: Current environment name. Controls assertion behavior.
+            Values like "dev", "development", "local", "test" enable strict mode.
+            Values like "prod", "production" enable lenient mode.
+        enable_asserts: Master switch to enable/disable ASSERT evaluations.
+            When False, ASSERT calls are completely skipped.
+
+    Example:
+        >>> config = AssertionConfig(environment="production", enable_asserts=True)
+        >>> AssertionManager.configure(config)
+    """
+
+    environment: str = "development"
+    enable_asserts: bool = True
+
+
+#: Type alias for failure strategy callbacks.
+#: A failure strategy receives a message and context dict, and handles the failure.
+FailureStrategy = Callable[[str, dict[str, Any], type[AssertFailure]], None]
+
+
+def _default_raise_strategy(
     message: str,
-    expression: str,
-    filename: str,
-    line: int,
-    function: str,
-    extra: dict[str, Any],
+    context: dict[str, Any],
+    exception_class: type[AssertFailure] = AssertFailure,
 ) -> None:
-    """Default handler for assertion failures.
-
-    - Logs the failure with context in a compact format.
-    - In debug mode: captures traceback and raises ValidationError
-    - In production mode: only logs the error
     """
-    short_file = Path(filename).name
-    location = f"{short_file}:{line} in {function}()"
+    Default strategy that raises an exception on assertion failure.
 
-    # Build the main log message as parts for easy joining
-    main_parts = [
-        "[ASSERT FAILED]",
-        f"{expression!r}",
+    Args:
+        message: Error message describing the failure.
+        context: Additional context data for debugging.
+        exception_class: The exception class to raise.
+
+    Raises:
+        AssertFailure: Or a subclass based on exception_class parameter.
+    """
+    raise exception_class(message, context=context)
+
+
+def _default_log_strategy(
+    message: str,
+    context: dict[str, Any],
+    exception_class: type[AssertFailure] = AssertFailure,
+) -> None:
+    """
+    Default strategy that logs assertion failures without raising.
+
+    Args:
+        message: Error message describing the failure.
+        context: Additional context data for debugging.
+        exception_class: The exception class (used for logging type info).
+    """
+    logger = AppLogger.get_logger("logguard.assertions")
+    logger.error(
+        "[ASSERTION FAILED] %s | type=%s | context=%s",
         message,
-        f"at {location}",
-    ]
-
-    # Add extra context if provided (sorted for consistency)
-    extra_str = ""
-    context_dict = {}
-    if extra:
-        extra_parts = [f"{k}={v!r}" for k, v in sorted(extra.items())]
-        extra_str = " | " + " ".join(extra_parts)
-        context_dict = dict(extra)
-
-    # Add assertion-specific context
-    context_dict.update(
-        {
-            "expression": expression,
-            "file": short_file,
-            "line": line,
-            "function": function,
-        }
+        exception_class.__name__,
+        context,
     )
 
-    # Log the error in a single line for better scannability
-    error_message = " ".join(main_parts) + extra_str
-    assertion_logger.error(error_message)
 
-    # In debug mode: capture traceback and raise exception
-    if __debug__:
-        try:
-            # Capture traceback excluding internals
-            stack = traceback.format_stack(limit=10)[:-3]
-            tb_str = "".join(stack).rstrip()
-            assertion_logger.debug("Assertion traceback:\n%s", tb_str)
-        except Exception:
-            assertion_logger.debug("Failed to capture traceback")
-
-    raise ValidationError(error_message, context=context_dict) from None
-
-    # In production mode: only log, no exception (optional - configure as needed)
-    # Optionally: raise ValidationError(error_message, context=context_dict) from None
+# ════════════════════════════════════════════════════════════════════════
+# Assertion Manager
+# ════════════════════════════════════════════════════════════════════════
 
 
-# Global failure handler
-_failure_handler: FailureHandler = _default_failure_handler
-
-
-def set_failure_handler(handler: FailureHandler) -> None:
-    """Replaces the global assertion failure handler."""
-    global _failure_handler
-    _failure_handler = handler
-
-
-def enforce(
-    condition: bool,
-    message: str = "Failed condition",
-    *,
-    expression: str = "<expression not captured>",
-    filename: str = "<unknown file>",
-    line: int = 0,
-    function: str = "<unknown function>",
-    extra: dict[str, Any] | None = None,
-    exc_type: type[ValidationError] = ValidationError,
-) -> None:
-    """Explicitly checks a condition and calls the failure handler if it fails.
-
-    Args:
-        condition: The condition to check (evaluated as bool).
-        message: Custom error message.
-        expression: Source code of the condition.
-        filename, line, function: Caller location info.
-        extra: Additional context for logs/exceptions.
-        exc_type: Exception type to raise on failure.
+class AssertionManager:
     """
-    if condition:
-        return
+    Central assertion engine for LogGuard.
 
-    extra = extra or {}
+    This class manages assertion configuration and behavior across the application.
+    It is closed for modification but open for extension via configure() and
+    set_failure_strategy().
 
-    # Fallback message if none provided
-    if not message or message == "Failed condition":
-        message = f"Assertion failed: {expression}"
+    The manager supports three assertion modes:
+        - "raise": Always raises an exception (used by CHECK)
+        - "debug_only": Raises in dev when enable_asserts=True (used by ASSERT)
+        - "dev_raise": Raises in dev, logs in prod (used by ENSURE/VERIFY)
 
-    # Call the configured handler
-    _failure_handler(message, expression, filename, line, function, extra)
+    Class Attributes:
+        _config: Current assertion configuration.
+        _raise_strategy: Callback for raising exceptions.
+        _log_strategy: Callback for logging failures.
 
-    # Optional: raise in production (configurable)
-    if not __debug__:
-        raise exc_type(
-            message=message,
-            context={
-                "expression": expression,
-                "location": f"{filename}:{line}",
-                "function": function,
-                **extra,
-            },
-        ) from None
-
-
-def ASSERT(
-    condition: bool,
-    message: str = "",
-    *,
-    extra: dict[str, Any] | None = None,
-    exc_type: type[ValidationError] = ValidationError,
-) -> None:
-    """Assertion with automatic source capture for expression and location.
-
-    This is a convenience function that automatically captures the source code
-    expression, filename, line number, and function name. Use for development-time
-    assertions that benefit from detailed context.
-
-    Usage examples:
-        ASSERT(x > 0)
-        ASSERT(len(users) > 0, "No users registered")
-        ASSERT(isinstance(data, dict), extra={"data_type": type(data).__name__})
-
-    Features:
-        - Automatically captures the expression from source code
-        - Separates condition from message if possible
-        - Falls back gracefully if capture fails
-        - Provides rich context for debugging
-
-    Args:
-        condition: The condition to check (any value, evaluated as bool).
-        message: Custom error message (optional).
-        extra: Additional context to include in logs/exceptions.
-        exc_type: Exception type to raise on failure.
+    Example:
+        >>> AssertionManager.configure(AssertionConfig(environment="production"))
+        >>> AssertionManager.set_failure_strategy(raise_strategy=my_custom_handler)
     """
-    if condition:
-        return
 
-    frame = inspect.currentframe()
-    if frame is None or frame.f_back is None:
-        enforce(
-            condition=False,
-            message=message or "Assertion without context",
-            expression="<expression not captured>",
+    _config: AssertionConfig = AssertionConfig(
+        environment=os.getenv("APP_ENV", "development").lower(),
+        enable_asserts=True,
+    )
+
+    _raise_strategy: FailureStrategy = _default_raise_strategy
+    _log_strategy: FailureStrategy = _default_log_strategy
+
+    # ─────────────────────────────────────────
+
+    @classmethod
+    def configure(cls, config: AssertionConfig) -> None:
+        """
+        Configure the assertion system.
+
+        Args:
+            config: New configuration to apply.
+
+        Example:
+            >>> AssertionManager.configure(
+            ...     AssertionConfig(environment="production", enable_asserts=False)
+            ... )
+        """
+        cls._config = config
+
+    @classmethod
+    def set_failure_strategy(
+        cls,
+        *,
+        raise_strategy: FailureStrategy | None = None,
+        log_strategy: FailureStrategy | None = None,
+    ) -> None:
+        """
+        Set custom failure handling strategies.
+
+        Use this to customize how assertion failures are handled. For example,
+        to send failures to an error tracking service.
+
+        Args:
+            raise_strategy: Custom callback for raising exceptions.
+                Signature: (message: str, context: dict, exception_class: type) -> None
+            log_strategy: Custom callback for logging failures.
+                Signature: (message: str, context: dict, exception_class: type) -> None
+
+        Example:
+            >>> def my_handler(msg, ctx, exc_cls):
+            ...     sentry.capture_message(msg, extra=ctx)
+            ...     raise exc_cls(msg, context=ctx)
+            >>> AssertionManager.set_failure_strategy(raise_strategy=my_handler)
+        """
+        if raise_strategy:
+            cls._raise_strategy = raise_strategy
+        if log_strategy:
+            cls._log_strategy = log_strategy
+
+    @classmethod
+    def reset(cls) -> None:
+        """
+        Reset the assertion manager to default configuration.
+
+        Useful for testing to restore initial state.
+        """
+        cls._config = AssertionConfig(
+            environment=os.getenv("APP_ENV", "development").lower(),
+            enable_asserts=True,
         )
-        return
+        cls._raise_strategy = _default_raise_strategy
+        cls._log_strategy = _default_log_strategy
 
-    caller = frame.f_back
-    expression = "<expression not captured>"
-    captured_message = ""  # For fallback if no message provided
+    # ─────────────────────────────────────────
 
-    try:
-        info = inspect.getframeinfo(caller, context=12)  # Increased context for reliability
-        code_lines = info.code_context or []
+    @classmethod
+    def _is_dev(cls) -> bool:
+        """Check if running in development environment."""
+        return cls._config.environment in ("dev", "development", "local", "test")
 
-        captured = extract_assert_arg(code_lines)
-        if captured:
-            # Split into condition and possible message
-            expr_part, captured_message = _split_captured_args(captured)
-            expression = expr_part
+    @classmethod
+    def _is_prod(cls) -> bool:
+        """Check if running in production environment."""
+        return cls._config.environment in ("prod", "production")
+
+    @classmethod
+    def _handle(
+        cls,
+        *,
+        condition: bool,
+        message: str,
+        context: dict[str, Any],
+        mode: str,
+        exception_class: type[AssertFailure] = AssertFailure,
+    ) -> None:
+        """
+        Internal handler for assertion evaluation.
+
+        Args:
+            condition: The condition to evaluate. If True, assertion passes.
+            message: Error message if assertion fails.
+            context: Additional context for debugging.
+            mode: Assertion mode ("raise", "dev_raise", "debug_only").
+            exception_class: Exception class to raise on failure.
+
+        Raises:
+            AssertFailure: Or subclass if condition is False and mode requires raising.
+            ValueError: If an unknown mode is specified.
+        """
+        if condition:
+            return
+
+        if mode == "raise":
+            cls._raise_strategy(message, context, exception_class)
+
+        elif mode == "dev_raise":
+            if cls._is_dev():
+                cls._raise_strategy(message, context, exception_class)
+            else:
+                cls._log_strategy(message, context, exception_class)
+
+        elif mode == "debug_only":
+            if cls._is_dev() and cls._config.enable_asserts:
+                cls._raise_strategy(message, context, exception_class)
+
         else:
-            # Fallback: try to get the exact line
-            target_lineno = caller.f_lineno
-            base_lineno = info.lineno - len(code_lines) + 1
-            for offset, ln in enumerate(code_lines):
-                if base_lineno + offset == target_lineno:
-                    stripped = ln.strip()
-                    if stripped.startswith("ASSERT("):
-                        inner = stripped[7:].rstrip(")").strip()
-                        expr_part, captured_message = _split_captured_args(inner)
-                        expression = expr_part
-                    else:
-                        expression = stripped
-                    break
+            raise ValueError(f"Unknown assertion mode: {mode}")
 
-    except Exception as e:
-        assertion_logger.exception(f"Failed to capture expression: {e}")
-        expression = "<failed to capture expression>"
 
-    # Use captured message if no explicit message provided
-    final_message = message or captured_message or "Assertion failed"
+# ════════════════════════════════════════════════════════════════════════
+# Base Assertions
+# ════════════════════════════════════════════════════════════════════════
 
-    # Auto-capture local variables if extra is not provided (opt-in via empty dict)
-    if extra is None and caller:
-        try:
-            # Capture relevant local variables (primitives and simple types)
-            locals_dict = caller.f_locals
-            captured_vars = {}
-            for var_name, var_value in locals_dict.items():
-                # Skip private, dunder, and complex objects
-                if not var_name.startswith("_") and isinstance(
-                    var_value, (int, float, str, bool, type(None), list, dict, tuple)
-                ):
-                    # Limit size to avoid huge logs
-                    str_val = str(var_value)
-                    if len(str_val) <= MAX_VAR_VALUE_LENGTH:
-                        captured_vars[var_name] = var_value
-            if captured_vars and len(captured_vars) <= MAX_LOCALS_CAPTURED:
-                extra = {"locals": captured_vars}
-        except Exception:
-            pass  # Silently fail if can't capture
 
-    enforce(
+def CHECK(condition: bool, message: str = "", **context: Any) -> None:
+    """
+    Fatal assertion that always raises on failure.
+
+    Use CHECK for critical invariants that must never be violated,
+    regardless of environment. This is the strictest assertion type.
+
+    Args:
+        condition: Condition to verify. Must be True for assertion to pass.
+        message: Error message describing what went wrong.
+        **context: Additional key-value pairs for debugging context.
+
+    Raises:
+        AssertFailure: Always raised when condition is False.
+
+    Example:
+        >>> CHECK(config is not None, "Configuration required", component="auth")
+        >>> CHECK(len(items) > 0, "Items list cannot be empty", items=items)
+    """
+    AssertionManager._handle(
         condition=condition,
-        message=final_message,
-        expression=expression,
-        filename=inspect.getfile(caller),
-        line=caller.f_lineno,
-        function=caller.f_code.co_name,
-        extra=extra,
-        exc_type=exc_type,
+        message=message or "CHECK failed",
+        context=context,
+        mode="raise",
+        exception_class=AssertFailure,
     )
 
 
-def _split_captured_args(captured: str) -> tuple[str, str]:
-    """Attempts to split the captured arguments into condition and message.
-
-    Assumes the message is the last positional argument if it's a string literal.
-    Handles simple cases but may not cover complex expressions or keyword args.
-
-    Returns:
-        (condition_str, message_str) - message_str is empty if no valid split.
+def ASSERT(condition: bool, message: str = "", **context: Any) -> None:
     """
-    if "," not in captured:
-        return captured, ""
+    Debug assertion that raises in development, ignored in production.
 
-    # Split from the right, assuming last part is message
-    parts = captured.rsplit(",", maxsplit=1)
-    cond_part = parts[0].strip()
-    msg_part = parts[1].strip()
-
-    # Check if msg_part is a string literal (basic check)
-    if (msg_part.startswith('"') and msg_part.endswith('"')) or (msg_part.startswith("'") and msg_part.endswith("'")):
-        message = msg_part[1:-1]  # Strip quotes
-        return cond_part, message
-
-    # No valid message split (e.g., keyword args or complex)
-    return captured, ""
-
-
-def extract_assert_arg(lines: list[str]) -> str | None:
-    """Extracts the arguments inside the last ASSERT(...) call from the code context.
-
-    This is a best-effort parser to capture the expression for better logs.
-    Handles common cases but may fail on complex or multi-line expressions.
-    """
-    if not lines:
-        return None
-
-    full_src = "".join(lines).strip()
-    if not full_src:
-        return None
-
-    # Find positions of "ASSERT(" (skipping likely strings/comments)
-    positions = []
-    i = 0
-    while True:
-        pos = full_src.find("ASSERT(", i)
-        if pos == -1:
-            break
-
-        # Basic filter for comments/strings
-        before = full_src[max(0, pos - 20) : pos]
-        last_line = before.split("\n")[-1]
-        if "#" in last_line or (before.count('"') % 2 == 1) or (before.count("'") % 2 == 1):
-            i = pos + 7
-            continue
-
-        positions.append(pos)
-        i = pos + 7
-
-    if not positions:
-        return None
-
-    # Use the last position
-    start = positions[-1]
-    i = start + 7
-    depth = 1
-    while i < len(full_src) and depth > 0:
-        ch = full_src[i]
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-        i += 1
-
-    if depth != 0:
-        # Fallback for unclosed (multi-line?)
-        line_start = full_src.rfind("\n", 0, start) + 1
-        line_end = full_src.find("\n", start)
-        if line_end == -1:
-            line_end = len(full_src)
-        candidate = full_src[line_start:line_end].strip()
-        if candidate.startswith("ASSERT("):
-            return candidate[7:].rstrip(")").strip()
-        return None
-
-    # Extract inner content
-    captured = full_src[start + 7 : i - 1].strip()
-
-    # Remove trailing comments
-    return captured.split("#", 1)[0].rstrip()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Convenient assertion helpers
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-def ASSERT_TYPE(obj: Any, expected_type: type | tuple[type, ...], message: str = "") -> None:
-    """Assert that obj is an instance of expected_type.
+    Use ASSERT for development-time checks that help catch bugs early
+    but shouldn't impact production performance or behavior.
 
     Args:
-        obj: Object to check.
-        expected_type: Expected type or tuple of types.
-        message: Custom error message.
+        condition: Condition to verify. Must be True for assertion to pass.
+        message: Error message describing what went wrong.
+        **context: Additional key-value pairs for debugging context.
 
-    Usage:
-        ASSERT_TYPE(user_id, int)
-        ASSERT_TYPE(data, (dict, list), "Data must be dict or list")
+    Raises:
+        AssertFailure: Raised in development when enable_asserts=True and
+            condition is False. Silently ignored in production.
+
+    Example:
+        >>> ASSERT(user_id > 0, "Invalid user ID", user_id=user_id)
+        >>> ASSERT(isinstance(data, dict), "Expected dict", got=type(data))
     """
-    type_names = (
-        expected_type.__name__ if isinstance(expected_type, type) else " or ".join(t.__name__ for t in expected_type)
-    )
-    default_msg = f"Expected type {type_names}, got {type(obj).__name__}"
-    ASSERT(
-        isinstance(obj, expected_type),
-        message or default_msg,
-        extra={"expected": type_names, "actual": type(obj).__name__, "value": obj},
+    AssertionManager._handle(
+        condition=condition,
+        message=message or "ASSERT failed",
+        context=context,
+        mode="debug_only",
+        exception_class=AssertFailure,
     )
 
 
-def ASSERT_IN(item: Any, container: Any, message: str = "") -> None:
-    """Assert that item is in container.
+def ENSURE(condition: bool, message: str = "", **context: Any) -> None:
+    """
+    Precondition assertion that raises in dev, logs in production.
+
+    Use ENSURE to validate preconditions at function entry points.
+    In development, violations are fatal. In production, they're logged
+    but execution continues.
 
     Args:
-        item: Item to check.
-        container: Container to check in.
-        message: Custom error message.
+        condition: Precondition to verify. Must be True to proceed.
+        message: Error message describing the violated precondition.
+        **context: Additional key-value pairs for debugging context.
 
-    Usage:
-        ASSERT_IN(status, ["active", "pending", "closed"])
-        ASSERT_IN("user_id", request.json)
+    Raises:
+        AssertFailure: Raised in development when condition is False.
+            In production, logs error and continues.
+
+    Example:
+        >>> def process_order(order: Order) -> None:
+        ...     ENSURE(order.is_valid(), "Invalid order", order_id=order.id)
+        ...     ENSURE(order.items, "Order has no items", order_id=order.id)
     """
-    default_msg = f"{item!r} not found in container"
-    ASSERT(
-        item in container,
-        message or default_msg,
-        extra={"item": item, "container_type": type(container).__name__},
+    AssertionManager._handle(
+        condition=condition,
+        message=message or "ENSURE failed",
+        context=context,
+        mode="dev_raise",
+        exception_class=AssertFailure,
     )
 
 
-def ASSERT_NOT_EMPTY(obj: Any, message: str = "") -> None:
-    """Assert that obj is not empty (len > 0 or truthy).
+def VERIFY(condition: bool, message: str = "", **context: Any) -> None:
+    """
+    Postcondition assertion that raises in dev, logs in production.
+
+    Use VERIFY to validate postconditions and return values.
+    Unlike ASSERT, VERIFY is always evaluated (not skipped in production).
+    In development, violations raise. In production, they're logged.
 
     Args:
-        obj: Object to check.
-        message: Custom error message.
+        condition: Postcondition to verify. Must be True to confirm success.
+        message: Error message describing the violated postcondition.
+        **context: Additional key-value pairs for debugging context.
 
-    Usage:
-        ASSERT_NOT_EMPTY(users, "No users found")
-        ASSERT_NOT_EMPTY(username)
+    Raises:
+        AssertFailure: Raised in development when condition is False.
+            In production, logs error and continues.
+
+    Example:
+        >>> result = calculate_total(items)
+        >>> VERIFY(result >= 0, "Total cannot be negative", result=result)
+        >>> return result
     """
-    default_msg = f"{type(obj).__name__} is empty"
-    ASSERT(
-        bool(obj) and (not hasattr(obj, "__len__") or len(obj) > 0),
-        message or default_msg,
-        extra={"type": type(obj).__name__, "length": len(obj) if hasattr(obj, "__len__") else None},
+    AssertionManager._handle(
+        condition=condition,
+        message=message or "VERIFY failed",
+        context=context,
+        mode="dev_raise",
+        exception_class=AssertFailure,
     )
 
 
-def ASSERT_RANGE(
-    value: int | float,
-    min_val: int | float,
-    max_val: int | float,
-    message: str = "",
-) -> None:
-    """Assert that value is within [min_val, max_val] range.
+# ════════════════════════════════════════════════════════════════════════
+# Specialized Assertions
+# ════════════════════════════════════════════════════════════════════════
+
+
+def ASSERT_NOT_NULL(value: Any, message: str = "") -> None:
+    """
+    Assert that a value is not None.
 
     Args:
         value: Value to check.
-        min_val: Minimum allowed value (inclusive).
-        max_val: Maximum allowed value (inclusive).
         message: Custom error message.
 
-    Usage:
-        ASSERT_RANGE(age, 0, 150)
-        ASSERT_RANGE(temperature, -273.15, 1000)
+    Raises:
+        NullError: In development when value is None.
+
+    Example:
+        >>> ASSERT_NOT_NULL(user, "User is required")
+        >>> ASSERT_NOT_NULL(config.api_key, "API key not configured")
     """
-    default_msg = f"Value {value} not in range [{min_val}, {max_val}]"
-    ASSERT(
-        min_val <= value <= max_val,
-        message or default_msg,
-        extra={"value": value, "min": min_val, "max": max_val},
+    AssertionManager._handle(
+        condition=value is not None,
+        message=message or "Value must not be None",
+        context={"value": value},
+        mode="debug_only",
+        exception_class=NullError,
+    )
+
+
+def ASSERT_NULL(value: Any, message: str = "") -> None:
+    """
+    Assert that a value is None.
+
+    Useful for verifying cleanup or ensuring optional values are unset.
+
+    Args:
+        value: Value to check.
+        message: Custom error message.
+
+    Raises:
+        NullError: In development when value is not None.
+
+    Example:
+        >>> ASSERT_NULL(cache.get(key), "Cache should be empty")
+    """
+    AssertionManager._handle(
+        condition=value is None,
+        message=message or "Value must be None",
+        context={"value": value},
+        mode="debug_only",
+        exception_class=NullError,
     )
 
 
 def ASSERT_EQUALS(actual: Any, expected: Any, message: str = "") -> None:
-    """Assert that actual equals expected.
+    """
+    Assert that two values are equal.
 
     Args:
-        actual: Actual value.
-        expected: Expected value.
+        actual: The actual value.
+        expected: The expected value.
         message: Custom error message.
 
-    Usage:
-        ASSERT_EQUALS(response.status_code, 200)
-        ASSERT_EQUALS(len(results), 5, "Should return 5 results")
+    Raises:
+        EqualsError: In development when actual != expected.
+
+    Example:
+        >>> ASSERT_EQUALS(response.status, 200, "Expected success status")
+        >>> ASSERT_EQUALS(len(items), 5, "Should have 5 items")
     """
-    default_msg = f"Expected {expected!r}, got {actual!r}"
-    ASSERT(
-        actual == expected,
-        message or default_msg,
-        extra={"actual": actual, "expected": expected},
+    AssertionManager._handle(
+        condition=actual == expected,
+        message=message or f"Expected {expected!r}, got {actual!r}",
+        context={"actual": actual, "expected": expected},
+        mode="debug_only",
+        exception_class=EqualsError,
     )
 
 
-def ASSERT_NONE(obj: Any, message: str = "") -> None:
-    """Assert that obj is None.
+def ASSERT_GREATER(a: Any, b: Any, message: str = "") -> None:
+    """
+    Assert that a is greater than b.
 
     Args:
-        obj: Object to check.
+        a: First value (should be greater).
+        b: Second value (should be less).
         message: Custom error message.
 
-    Usage:
-        ASSERT_NONE(error, "Unexpected error occurred")
+    Raises:
+        ComparisonError: In development when a <= b.
+
+    Example:
+        >>> ASSERT_GREATER(balance, 0, "Balance must be positive")
+        >>> ASSERT_GREATER(end_date, start_date, "Invalid date range")
     """
-    default_msg = f"Expected None, got {type(obj).__name__}"
-    ASSERT(obj is None, message or default_msg, extra={"actual": obj})
+    AssertionManager._handle(
+        condition=a > b,
+        message=message or f"{a} is not greater than {b}",
+        context={"a": a, "b": b},
+        mode="debug_only",
+        exception_class=ComparisonError,
+    )
 
 
-def ASSERT_NOT_NONE(obj: Any, message: str = "") -> None:
-    """Assert that obj is not None.
+def ASSERT_LESS(a: Any, b: Any, message: str = "") -> None:
+    """
+    Assert that a is less than b.
 
     Args:
-        obj: Object to check.
+        a: First value (should be less).
+        b: Second value (should be greater).
         message: Custom error message.
 
-    Usage:
-        ASSERT_NOT_NONE(user, "User not found")
+    Raises:
+        ComparisonError: In development when a >= b.
+
+    Example:
+        >>> ASSERT_LESS(retry_count, max_retries, "Too many retries")
+        >>> ASSERT_LESS(age, 150, "Invalid age")
     """
-    default_msg = "Value is None"
-    ASSERT(obj is not None, message or default_msg, extra={"value": obj})
+    AssertionManager._handle(
+        condition=a < b,
+        message=message or f"{a} is not less than {b}",
+        context={"a": a, "b": b},
+        mode="debug_only",
+        exception_class=ComparisonError,
+    )
+
+
+def ASSERT_IN_RANGE(
+    value: int | float,
+    min_value: int | float,
+    max_value: int | float,
+    message: str = "",
+) -> None:
+    """
+    Assert that a value is within an inclusive range [min, max].
+
+    Args:
+        value: Value to check.
+        min_value: Minimum allowed value (inclusive).
+        max_value: Maximum allowed value (inclusive).
+        message: Custom error message.
+
+    Raises:
+        RangeError: In development when value is outside range.
+
+    Example:
+        >>> ASSERT_IN_RANGE(percentage, 0, 100, "Invalid percentage")
+        >>> ASSERT_IN_RANGE(age, 18, 65, "Age out of valid range")
+    """
+    AssertionManager._handle(
+        condition=min_value <= value <= max_value,
+        message=message or f"{value} not in range [{min_value}, {max_value}]",
+        context={"value": value, "min": min_value, "max": max_value},
+        mode="debug_only",
+        exception_class=RangeError,
+    )
+
+
+def ASSERT_BETWEEN_EXCLUSIVE(
+    value: int | float,
+    min_value: int | float,
+    max_value: int | float,
+    message: str = "",
+) -> None:
+    """
+    Assert that a value is within an exclusive range (min, max).
+
+    The boundaries are excluded: min < value < max.
+
+    Args:
+        value: Value to check.
+        min_value: Minimum boundary (exclusive).
+        max_value: Maximum boundary (exclusive).
+        message: Custom error message.
+
+    Raises:
+        RangeError: In development when value is outside range.
+
+    Example:
+        >>> ASSERT_BETWEEN_EXCLUSIVE(ratio, 0.0, 1.0, "Ratio must be between 0 and 1")
+    """
+    AssertionManager._handle(
+        condition=min_value < value < max_value,
+        message=message or f"{value} not in exclusive range ({min_value}, {max_value})",
+        context={"value": value, "min": min_value, "max": max_value},
+        mode="debug_only",
+        exception_class=RangeError,
+    )
+
+
+def ASSERT_TYPE(value: Any, expected: type | tuple[type, ...], message: str = "") -> None:
+    """
+    Assert that a value is of the expected type.
+
+    Args:
+        value: Value to check.
+        expected: Expected type or tuple of types.
+        message: Custom error message.
+
+    Raises:
+        TypeErrorAssert: In development when value is not of expected type.
+
+    Example:
+        >>> ASSERT_TYPE(config, dict, "Config must be a dictionary")
+        >>> ASSERT_TYPE(value, (int, float), "Expected numeric type")
+    """
+    AssertionManager._handle(
+        condition=isinstance(value, expected),
+        message=message or f"Expected type {expected}, got {type(value)}",
+        context={"value": value, "expected": expected, "actual": type(value)},
+        mode="debug_only",
+        exception_class=TypeErrorAssert,
+    )
+
+
+def ASSERT_NOT_EMPTY(value: Any, message: str = "") -> None:
+    """
+    Assert that a value is not empty (truthy).
+
+    Works with strings, lists, dicts, sets, and any object with __bool__ or __len__.
+
+    Args:
+        value: Value to check.
+        message: Custom error message.
+
+    Raises:
+        EmptyError: In development when value is empty/falsy.
+
+    Example:
+        >>> ASSERT_NOT_EMPTY(users, "No users found")
+        >>> ASSERT_NOT_EMPTY(name.strip(), "Name cannot be blank")
+    """
+    AssertionManager._handle(
+        condition=bool(value),
+        message=message or f"{type(value).__name__} is empty",
+        context={
+            "value": value,
+            "length": len(value) if hasattr(value, "__len__") else None,
+        },
+        mode="debug_only",
+        exception_class=EmptyError,
+    )
+
+
+def ASSERT_IN(item: Any, container: Any, message: str = "") -> None:
+    """
+    Assert that an item exists in a container.
+
+    Args:
+        item: Item to find.
+        container: Container to search (list, set, dict, str, etc.).
+        message: Custom error message.
+
+    Raises:
+        MembershipError: In development when item is not in container.
+
+    Example:
+        >>> ASSERT_IN(status, ["pending", "active", "completed"], "Invalid status")
+        >>> ASSERT_IN(user_id, allowed_users, "User not authorized")
+    """
+    AssertionManager._handle(
+        condition=item in container,
+        message=message or f"{item!r} not found in container",
+        context={"item": item, "container_type": type(container).__name__},
+        mode="debug_only",
+        exception_class=MembershipError,
+    )
