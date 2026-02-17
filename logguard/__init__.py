@@ -20,7 +20,7 @@ Quick examples:
     x = -5
     ASSERT(x > 0, "Value must be positive", extra={"value": x})
 
-Version: 0.2.0
+Version: 0.2.1
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from . import asserts, exceptions, logger
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __all__ = ["__version__", "asserts", "exceptions", "logger"]
 
 

@@ -120,7 +120,10 @@ Logguard provides a semantic exception hierarchy for clearer error handling:
 
 ```python
 from logguard.exceptions import (
-    ValidationError, ConfigurationError, ResourceNotFoundError
+    LogGuardError,
+    ValidationError,
+    ConfigurationError,
+    ResourceNotFoundError
 )
 
 # Validation errors (from ASSERT failures)
@@ -243,7 +246,7 @@ set_failure_handler(custom_handler)
 <details>
 <summary><strong>Exceptions</strong> - Semantic Error Hierarchy</summary>
 
-All exceptions inherit from `AppBaseError` and include rich context information.
+All exceptions inherit from `LogGuardError` and include rich context information.
 
 **Properties:**
 
@@ -254,7 +257,7 @@ All exceptions inherit from `AppBaseError` and include rich context information.
 **Hierarchy:**
 
 ```txt
-AppBaseError
+LogGuardError
 ├── ConfigurationError
 │   └── MissingConfigError
 ├── ValidationError              (raised by ASSERT)
@@ -267,6 +270,7 @@ AppBaseError
 
 ```python
 from logguard.exceptions import (
+    LogGuardError,
     ValidationError,
     ConfigurationError,
     ResourceNotFoundError,
@@ -286,8 +290,18 @@ raise ForbiddenError("Access denied for user", user_id=456)
 # Serialize for logging
 try:
     raise ValidationError("Invalid input", field="username")
-except ValidationError as e:
+except LogGuardError as e:
     logger.exception(f"Error details: {e.to_dict()}")
+```
+
+**Deprecated:** `AppBaseError` was removed in v0.2.1. Use `LogGuardError` instead:
+
+```python
+# ❌ Old (v0.2.0 and earlier)
+from logguard.exceptions import AppBaseError
+
+# ✅ New (recommended)
+from logguard.exceptions import LogGuardError
 ```
 
 </details>
