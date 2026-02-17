@@ -1,10 +1,10 @@
 """Logging utilities and a convenience logger configuration helper.
 
 This module provides ``AppLogger``, a simple helper to configure the Python
-logging subsystem with sensible defaults (file rotation, console handler,
-optional rich formatting, and optional JSON output).
+logging subsystem with sensible defaults (file rotation, console handler with
+rich formatting, and optional JSON output).
 
-Usage example::
+Usage example:
 
     from logguard.logger import AppLogger
 
@@ -17,20 +17,19 @@ centralized logging configuration without repeating boilerplate.
 """
 
 import logging
-import os
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
-try:
-    from rich.console import Console
-    from rich.logging import RichHandler
+from rich.console import Console
+from rich.logging import RichHandler
 
-    RICH_AVAILABLE = True
+try:
+    from pythonjsonlogger.json import JsonFormatter
+
+    JSON_LOGGER_AVAILABLE = True
 except ImportError:
-    # Ensure name exists even if rich is not installed (avoids linter complaints)
-    Console = None  # type: ignore[assignment,misc]
-    RichHandler = None  # type: ignore[assignment,misc]
-    RICH_AVAILABLE = False
+    JsonFormatter = None  # type: ignore[assignment,misc]
+    JSON_LOGGER_AVAILABLE = False
 
 
 class AppLogger:
@@ -64,14 +63,15 @@ class AppLogger:
         log_file: str | None = None,
         console_level: str | int = logging.INFO,
         file_level: str | int = logging.DEBUG,
-        json_logs: bool = os.getenv("JSON_LOGS", "false").lower() == "true",
+        json_logs: bool = False,
         max_bytes: int | None = None,
         backup_count: int | None = None,
         force: bool = False,
+        delay: bool = True,
     ) -> None:
         """Configure the Python logging system with sensible defaults.
 
-        Sets up file rotation (RotatingFileHandler), console output with optional
+        Sets up file rotation (RotatingFileHandler), console output with beautiful
         rich formatting, and optional JSON log output. Silences noisy libraries.
         Only runs once unless force=True.
 
@@ -82,7 +82,8 @@ class AppLogger:
             json_logs: Enable JSON-formatted logging (requires python-json-logger).
             max_bytes: Max file size before rotation (default: 5MB).
             backup_count: Number of backup files to keep (default: 3).
-            force: If True, reconfigure even if already configured.
+            force: If True, clear existing handlers and re-apply configuration (useful in tests or after fork/exec)
+            delay: If True, delay file creation until the first log message (default: True).
         """
         if cls._configured and not force:
             return
@@ -91,66 +92,131 @@ class AppLogger:
         max_bytes = max_bytes or cls.DEFAULT_MAX_BYTES
         backup_count = backup_count or cls.DEFAULT_BACKUP_COUNT
 
-        def resolve_level(value: str | int, default: int) -> int:
-            """Convert log level string or int to int, falling back to default if invalid."""
-            if isinstance(value, int):
-                return value
-            if isinstance(value, str):
-                lv = getattr(logging, value.upper(), None)
-                if isinstance(lv, int):
-                    return lv
-            # Fallback to default if level is invalid
-            logging.warning("Invalid log level %r. Falling back to %s", value, logging.getLevelName(default))
-            return default
-
-        console_level = resolve_level(console_level, logging.INFO)
-        file_level = resolve_level(file_level, logging.DEBUG)
+        console_level = cls._resolve_level(console_level, logging.INFO)
+        file_level = cls._resolve_level(file_level, logging.DEBUG)
 
         root = logging.getLogger()
 
         # Clear existing handlers if force=True
         if force:
             root.handlers.clear()
-        else:
-            # Check if we already have our handlers to avoid duplicates
-            has_file_handler = any(isinstance(h, RotatingFileHandler) for h in root.handlers)
-            # Console handler can be RichHandler or StreamHandler (but not RotatingFileHandler)
-            has_console_handler = any(
-                isinstance(h, logging.StreamHandler) and not isinstance(h, RotatingFileHandler) for h in root.handlers
-            )
-            # If we already have both handlers, don't add duplicates
-            if has_file_handler and has_console_handler:
-                cls._configured = True
-                return
+        elif cls._already_configured(root):
+            cls._configured = True
+            return
 
         root.setLevel(logging.DEBUG)  # The handlers will filter
 
-        # File handler (human-readable)
-        log_path = Path(log_file)
+        log_path: Path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        file_handler = RotatingFileHandler(
+        # File handler (human-readable)
+        file_handler = cls._create_file_handler(log_file, file_level, max_bytes, backup_count, delay)
+        root.addHandler(file_handler)
+
+        # Console handler with rich formatting
+        console_handler = cls._create_console_handler(console_level)
+        root.addHandler(console_handler)
+
+        # Optionally add JSON-formatted logging (requires python-json-logger package)
+        if json_logs:
+            json_handler = cls._create_json_handler(log_path, file_level, max_bytes, backup_count, delay)
+            if json_handler:
+                root.addHandler(json_handler)
+            else:
+                logging.warning(
+                    "JSON logging requested but python-json-logger is not installed. "
+                    "Falling back to plain text file logging. "
+                    "Install with: pip install python-json-logger"
+                )
+        else:
+            logging.debug("JSON logging is disabled. To enable, set json_logs=True")
+
+        logging.captureWarnings(True)  # Capture Python warnings as logs
+        cls._configured = True
+
+    @staticmethod
+    def _already_configured(root: logging.Logger) -> bool:
+        """Check if logging is already configured with our handlers to avoid duplicates."""
+        has_file = any(isinstance(h, RotatingFileHandler) for h in root.handlers)
+        # Console handler will be a RichHandler or StreamHandler (but not RotatingFileHandler)
+        has_console = any(
+            isinstance(h, (RichHandler, logging.StreamHandler)) and not isinstance(h, RotatingFileHandler)
+            for h in root.handlers
+        )
+        # If we already have both handlers, we consider it configured
+        return has_file and has_console
+
+    @staticmethod
+    def _resolve_level(value: str | int, default: int) -> int:
+        """Convert log level string or int to int, falling back to default if invalid."""
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str):
+            return getattr(logging, value.upper(), default)
+        # Fallback to default if level is invalid
+        logging.warning("Invalid log level %r. Falling back to %s", value, logging.getLevelName(default))
+        return default
+
+    @classmethod
+    def _create_file_handler(
+        cls,
+        log_file: str | Path,
+        level: int,
+        max_bytes: int,
+        backup_count: int,
+        delay: bool = True,
+    ) -> RotatingFileHandler:
+        """
+        Helper to create a RotatingFileHandler with the given settings.
+
+        Ensures the log directory exists and configures the handler with a standard format.
+
+        Args:
+            log_file: Path to the log file.
+            level: Log level for the handler.
+            max_bytes: Max file size before rotation.
+            backup_count: Number of backup files to keep.
+            delay: If True, delay file creation until the first log message (default: True).
+
+        Returns:
+            Configured RotatingFileHandler instance.
+        """
+
+        handler = RotatingFileHandler(
             log_file,
             maxBytes=max_bytes,
             backupCount=backup_count,
             encoding="utf-8",
-            delay=False,  # Create file immediately for testing and immediate logging
+            delay=delay,  # Delay file creation until the first log message
         )
-        file_handler.setLevel(file_level)
+        handler.setLevel(level)
 
         # Format for file logs (includes logger name and thread info)
-        file_fmt = logging.Formatter(
-            "%(asctime)s | %(name)-17s | %(levelname)-7s | %(message)s  [%(threadName)s]",
-            datefmt="%Y-%m-%d %H:%M:%S",
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s | %(name)-17s | %(levelname)-7s | %(message)s  [%(threadName)s]",
+                datefmt="%Y-%m-%d %H:%M:%S",
+            )
         )
-        file_handler.setFormatter(file_fmt)
+        return handler
 
-        root.addHandler(file_handler)
+    @classmethod
+    def _create_console_handler(
+        cls,
+        level: int,
+    ) -> logging.Handler:
+        """
+        Helper to create a console handler with rich formatting.
+        If Rich is not available, falls back to a standard StreamHandler with a simple format.
 
-        # Console handler with rich formatting if available
-        if RICH_AVAILABLE and RichHandler is not None and Console is not None:
-            console_handler: logging.Handler = RichHandler(
-                level=console_level,
+        Args:
+            level: Log level for the console handler.
+        Returns:
+            Configured logging.Handler instance.
+        """
+        try:
+            return RichHandler(
+                level=level,
                 console=Console(force_terminal=True, soft_wrap=True),
                 show_time=True,  # Display timestamp
                 log_time_format="%H:%M:%S",  # Time format for console logs
@@ -161,63 +227,84 @@ class AppLogger:
                 tracebacks_show_locals=True,  # Show local variables in tracebacks
                 markup=False,  # Disable markup parsing in messages
             )
-        else:
-            console_handler = logging.StreamHandler()
-            console_handler.setFormatter(
+        except ImportError:
+            handler = logging.StreamHandler()
+            handler.setLevel(level)
+            handler.setFormatter(
                 logging.Formatter(
-                    "%(asctime)s [%(levelname)s] %(name)-17s: %(message)s",
+                    "%(asctime)s · %(levelname)-7s · %(name)-18s · %(message)s",
                     datefmt="%H:%M:%S",
                 )
             )
+            return handler
 
-        console_handler.setLevel(console_level)
-        root.addHandler(console_handler)
+    @classmethod
+    def _create_json_handler(
+        cls,
+        log_file: str | Path,
+        level: int,
+        max_bytes: int,
+        backup_count: int,
+        delay: bool = True,
+    ) -> logging.Handler | None:
+        """
+        Helper to create a JSON-formatted file handler using python-json-logger.
 
-        # Optionally add JSON-formatted logging (requires python-json-logger package)
-        if json_logs:
-            try:
-                from pythonjsonlogger.json import JsonFormatter
+        Args:
+            log_file: Path to the log file.
+            level: Log level for the handler.
+            max_bytes: Max file size before rotation.
+            backup_count: Number of backup files to keep.
+            delay: If True, delay file creation until the first log message (default: True).
+        """
+        if not JSON_LOGGER_AVAILABLE or JsonFormatter is None:
+            return None
 
-                json_file = str(log_path.with_suffix(".json"))
-                json_handler = RotatingFileHandler(
-                    json_file,
-                    maxBytes=max_bytes,
-                    backupCount=backup_count,
-                    encoding="utf-8",
-                )
-                json_handler.setLevel(file_level)
-                json_handler.setFormatter(
-                    JsonFormatter(
-                        fmt=(
-                            "%(asctime)s %(name)s %(levelname)s %(message)s "
-                            "%(pathname)s %(lineno)d %(funcName)s %(threadName)s"
-                        ),
-                        timestamp=True,
-                    )
-                )
-                root.addHandler(json_handler)
-            except ImportError:
-                logging.warning("python-json-logger not installed: JSON logs disabled")
+        json_path = str(Path(log_file).with_suffix(".json"))
 
-        # Suppress verbose logging from common third-party libraries
-        noisy_modules = [
+        json_handler = RotatingFileHandler(
+            json_path,
+            maxBytes=max_bytes,
+            backupCount=backup_count,
+            encoding="utf-8",
+            delay=delay,
+        )
+        json_handler.setLevel(level)
+        json_handler.setFormatter(
+            JsonFormatter(
+                fmt=(
+                    "%(asctime)s %(name)s %(levelname)s %(message)s "
+                    "%(pathname)s %(lineno)d %(funcName)s %(threadName)s "
+                    "%(exc_info)s %(stack_info)s"
+                ),
+                timestamp=True,
+                json_ensure_ascii=False,
+            )
+        )
+        return json_handler
+
+    @classmethod
+    def silence_noisy_libraries(cls, modules: list[str] | None = None) -> None:
+        """
+        Silence noisy third-party libraries by setting their log level to WARNING.
+        If no modules are specified, a default list of common noisy libraries is used.
+        Args:
+            modules: List of module names to silence (default: ['PIL', 'matplotlib', 'urllib3', 'openai']).
+        """
+        default_noisy: list[str] = [
             "PIL",
             "matplotlib",
             "urllib3",
-            "asyncio",
-            "pdf2image",
-            "httpcore",
-            "httpx",
-            "charset_normalizer",
             "openai",
-            "anthropic",
         ]
-        for mod in noisy_modules:
-            logging.getLogger(mod).setLevel(logging.WARNING)
-            logging.getLogger(mod).propagate = False  # Prevent logs from propagating up
+        rel_modules: list[str] | None = modules if modules is not None else default_noisy
 
-        logging.captureWarnings(True)  # Capture Python warnings as logs
-        cls._configured = True
+        if rel_modules is None:
+            return
+
+        for mod in rel_modules:
+            logging.getLogger(mod).setLevel(logging.WARNING)
+            logging.getLogger(mod).propagate = False  # Prevent logs from propagating up to root
 
     @classmethod
     def get_logger(cls, name: str | None = None, auto_name: bool = True) -> logging.Logger:
@@ -280,7 +367,9 @@ class AppLogger:
 
         elif handler_type == "console":
             for handler in target_logger.handlers:
-                if isinstance(handler, logging.StreamHandler) and not isinstance(handler, RotatingFileHandler):
+                if isinstance(handler, (logging.StreamHandler, RichHandler)) and not isinstance(
+                    handler, RotatingFileHandler
+                ):
                     handler.setLevel(level)
 
         elif handler_type == "file":
