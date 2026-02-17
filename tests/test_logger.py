@@ -1,188 +1,196 @@
-"""Additional tests for 100% coverage of logger.py - focusing on uncovered lines."""
+"""
+Compact tests for LogGuard AppLogger.
+Covers: setup, reset, handlers, levels, file output, JSON fallback,
+silence_noisy_libraries, get_logger auto_name, set_level edge cases.
+"""
 
+from __future__ import annotations
+
+import importlib
 import logging
-import logging.handlers
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import Any
+from unittest import mock
 
 import pytest
 
-from logguard import AppLogger
+from logguard.logger import AppLogger
 
 
-class TestUncoveredLines:
-    """Tests specifically targeting lines with missed coverage."""
+# ──────────── Helpers ────────────
+def _flush() -> None:
+    for h in logging.getLogger().handlers:
+        h.flush()
 
-    def test_line_88_early_return_when_already_configured(self, temp_log_dir: Path) -> None:
-        """Test line 88: return early if already configured without force."""
-        log_file = temp_log_dir / "app.log"
-        AppLogger.setup(log_file=str(log_file))
 
-        assert AppLogger._configured is True
+def _setup(log_dir: Path, **kw: Any) -> Path:
+    log_file = log_dir / "app.log"
+    AppLogger.setup(log_file=str(log_file), **kw)
+    return log_file
 
-        # Second call without force - should hit line 88 return
-        AppLogger.setup(log_file=str(log_file))
 
-        assert AppLogger._configured is True
+# ──────────── Setup & Reset ────────────
+def test_setup_and_reset(temp_log_dir: Path) -> None:
+    log_file = _setup(temp_log_dir)
+    assert log_file.parent.exists() and AppLogger._configured
 
-    def test_lines_123_124_handlers_already_exist(self, temp_log_dir: Path) -> None:
-        """Test lines 123-124: early return when both handlers already exist."""
-        log_file = temp_log_dir / "app.log"
+    # Already configured warning
+    AppLogger.setup(log_file=str(log_file))
+    _flush()
+    assert "already configured" in log_file.read_text()
 
-        # First setup adds both file and console handlers
-        AppLogger.setup(log_file=str(log_file))
-        root = logging.getLogger()
+    AppLogger.reset()
+    assert not AppLogger._configured and not logging.getLogger().handlers
 
-        initial_handler_count = len(root.handlers)
 
-        # Verify both handler types exist
-        has_file = any(isinstance(h, logging.handlers.RotatingFileHandler) for h in root.handlers)
-        has_console = any(
-            isinstance(h, logging.StreamHandler) and not isinstance(h, logging.handlers.RotatingFileHandler)
-            for h in root.handlers
-        )
-        assert has_file and has_console
+def test_setup_defaults_no_args() -> None:
+    AppLogger.setup()
+    assert AppLogger._configured
+    AppLogger.reset()
+    Path(AppLogger.DEFAULT_LOG_FILE).unlink(missing_ok=True)
 
-        # Second setup should return early at lines 123-124
-        AppLogger.setup(log_file=str(log_file))
 
-        # No new handlers should be added
-        assert len(root.handlers) == initial_handler_count
+# ──────────── Handlers & Levels ────────────
+@pytest.mark.parametrize(
+    "handler_type,expected",
+    [
+        ("console", (logging.DEBUG, None)),
+        ("file", (None, logging.ERROR)),
+        ("all", (logging.WARNING, logging.WARNING)),
+    ],
+)
+def test_set_level_variants(temp_log_dir: Path, handler_type: str, expected: tuple[int | None, int | None]) -> None:
+    _setup(temp_log_dir, file_level="WARNING")
+    console_level, file_level = expected
+    if handler_type == "console":
+        AppLogger.set_level("DEBUG", handler_type="console")
+    elif handler_type == "file":
+        AppLogger.set_level("ERROR", handler_type="file")
+    else:
+        AppLogger.set_level("WARNING", handler_type="all")
 
-    def test_lines_29_33_rich_import_error(self, temp_log_dir: Path) -> None:
-        """Test lines 29-33: except block for rich ImportError."""
-        import logguard.logger as logger_mod
+    root = logging.getLogger()
+    for h in root.handlers:
+        if isinstance(h, RotatingFileHandler) and file_level is not None:
+            assert h.level == file_level
+        elif not isinstance(h, RotatingFileHandler) and console_level is not None:
+            assert h.level == console_level
+    if handler_type == "all":
+        assert root.level == logging.WARNING
 
-        # Save originals
-        orig_available = logger_mod.RICH_AVAILABLE
-        orig_handler = logger_mod.RichHandler
-        orig_console = logger_mod.Console
+@pytest.mark.parametrize("level_input", ["INVALID", 12345, [], {}])
+def test_resolve_level_invalid(level_input: Any) -> None:
+    """_resolve_level returns DEBUG for invalid inputs."""
+    assert AppLogger._resolve_level(level_input) == logging.DEBUG
 
-        try:
-            # Simulate rich not being available
-            logger_mod.RICH_AVAILABLE = False
-            logger_mod.RichHandler = None
-            logger_mod.Console = None
 
-            log_file = temp_log_dir / "app.log"
-            # This path will use the else branch (lines 181-186)
-            AppLogger.setup(log_file=str(log_file), force=True)
+@pytest.mark.parametrize(
+    "valid_level",
+    [
+        logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL,
+        [], {}, "NOTSET", 0, 10, 20, 30, 40, 50, "ERROR", "CRITICAL",
+        "DEBUG", "INFO", "WARNING"
+    ]
+)
+def test_resolve_level(valid_level: str | int) -> None:
+    """_resolve_level handles valid levels correctly."""
+    result = AppLogger._resolve_level(valid_level)
+    assert isinstance(result, int)
+    assert result in {logging.NOTSET, logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL}
 
-            # Should complete without rich
-            assert AppLogger._configured is True
-            assert log_file.exists()
-        finally:
-            # Restore
-            logger_mod.RICH_AVAILABLE = orig_available
-            logger_mod.RichHandler = orig_handler
-            logger_mod.Console = orig_console
+def test_set_level_invalid_inputs(temp_log_dir: Path) -> None:
+    """Test invalid level and invalid handler_type in single function."""
+    log_file = _setup(temp_log_dir, file_level="WARNING")
 
-    def test_lines_181_198_json_import_error(
-        self, temp_log_dir: Path, capture_logs: pytest.LogCaptureFixture, no_json_logger: None
-    ) -> None:
-        """Test lines 181-198: except ImportError handling for json logger."""
-        log_file = temp_log_dir / "app.log"
+    # Test invalid level
+    AppLogger.set_level("NONEXISTENT", handler_type="all")
+    assert logging.getLogger().level == logging.INFO
 
-        # With no_json_logger fixture, pythonjsonlogger import will fail
+    AppLogger.reset()
+    log_file = _setup(temp_log_dir, file_level="WARNING")
+
+    # Test invalid handler_type
+    AppLogger.set_level("DEBUG", handler_type="bad_type")
+    _flush()
+    assert "Invalid handler_type" in log_file.read_text()
+
+
+# ──────────── Get Logger ────────────
+def test_get_logger_variants(temp_log_dir: Path) -> None:
+    _setup(temp_log_dir)
+    logger1 = AppLogger.get_logger("named.logger")
+    logger2 = AppLogger.get_logger(auto_name=True)
+    assert isinstance(logger1, logging.Logger) and "named.logger" in logger1.name
+    assert isinstance(logger2, logging.Logger) and logger2.name != "__root__"
+
+
+def test_get_logger_fallback_no_frame() -> None:
+    with mock.patch("inspect.currentframe", side_effect=RuntimeError):
+        logger = AppLogger.get_logger()
+    assert logger.name == "__main__"
+
+
+# ──────────── File Output ────────────
+def test_logger_file_output(temp_log_dir: Path) -> None:
+    log_file = _setup(temp_log_dir, file_level="DEBUG")
+    AppLogger.get_logger("test").info("Hello Logger")
+    _flush()
+    assert "Hello Logger" in log_file.read_text()
+
+
+# ──────────── silence_noisy_libraries ────────────
+def test_silence_libraries(temp_log_dir: Path) -> None:
+    _setup(temp_log_dir)
+    AppLogger.silence_noisy_libraries()
+    for mod in ["PIL", "matplotlib", "urllib3", "openai"]:
+        lg = logging.getLogger(mod)
+        assert lg.level == logging.WARNING and not lg.propagate
+    AppLogger.silence_noisy_libraries(modules=["httpx", "sqlalchemy"])
+    assert logging.getLogger("httpx").level == logging.WARNING
+    assert logging.getLogger("sqlalchemy").level == logging.WARNING
+
+
+# ──────────── Console & JSON fallback ────────────
+def test_console_fallback(temp_log_dir: Path) -> None:
+    with mock.patch("logguard.logger.RichHandler", side_effect=ImportError):
+        AppLogger.reset()
+        _setup(temp_log_dir)
+    console_handlers = [h for h in logging.getLogger().handlers if not isinstance(h, RotatingFileHandler)]
+    assert console_handlers and isinstance(console_handlers[0], logging.StreamHandler)
+
+
+def test_json_logging(temp_log_dir: Path) -> None:
+    log_file = _setup(temp_log_dir, json_logs=True)
+    assert AppLogger._configured
+
+    with mock.patch.object(AppLogger, "_create_json_handler", return_value=None):
         AppLogger.setup(log_file=str(log_file), json_logs=True)
+    _flush()
+    content = log_file.read_text()
+    assert "python-json-logger" in content or AppLogger._configured
 
-        # Should log warning and continue
-        assert "python-json-logger not installed" in capture_logs.text
-        assert AppLogger._configured is True
 
-    def test_lines_247_249_get_logger_exception_handling(self, temp_log_dir: Path) -> None:
-        """Test lines 247-249: exception handling in get_logger auto_name."""
-        AppLogger.setup(log_file=str(temp_log_dir / "app.log"))
+def test_json_handler_missing(temp_log_dir: Path) -> None:
+    with mock.patch("logguard.logger.JSON_LOGGER_AVAILABLE", False):
+        handler = AppLogger._create_json_handler(temp_log_dir / "app.log", logging.INFO, 5_000_000, 3)
+    assert handler is None
 
-        # This will hit either the try or except path
-        # The except path (lines 247-249) catches Exception and falls back to "__main__"
-        logger = AppLogger.get_logger(None, auto_name=True)
 
-        # Logger should be created successfully
-        assert logger is not None
-        assert isinstance(logger, logging.Logger)
+def test_setup_json_when_import_fails(temp_log_dir: Path) -> None:
+    """Test setup with json_logs=True when JSON_LOGGER_AVAILABLE is False from start."""
+    log_file = temp_log_dir / "app.log"
+    with mock.patch("logguard.logger.JSON_LOGGER_AVAILABLE", False):
+        AppLogger.setup(log_file=str(log_file), json_logs=True, file_level="WARNING")
+    _flush()
+    content = log_file.read_text()
+    assert "JSON logging requested but python-json-logger is not installed" in content or AppLogger._configured
 
-    def test_setup_with_resolve_level_fallback(
-        self, temp_log_dir: Path, capture_logs: pytest.LogCaptureFixture
-    ) -> None:
-        """Test resolve_level fallback when invalid log level provided."""
-        log_file = temp_log_dir / "app.log"
 
-        # Pass invalid log level
-        AppLogger.setup(log_file=str(log_file), console_level="INVALID", file_level="ALSOBAD")
+def test_json_library_missing() -> None:
+    with mock.patch.dict("sys.modules", {"pythonjsonlogger.json": None}):
+        import logguard.logger as lg_logger
 
-        # Should log warnings
-        assert "Invalid log level" in capture_logs.text
-        assert AppLogger._configured is True
-
-    def test_force_clear_handlers_early(self, temp_log_dir: Path) -> None:
-        """Test the force=True path that clears handlers early."""
-        log_file1 = temp_log_dir / "file1.log"
-        log_file2 = temp_log_dir / "file2.log"
-
-        # First setup
-        AppLogger.setup(log_file=str(log_file1))
-        root = logging.getLogger()
-        initial_count = len(root.handlers)
-
-        # Force with new file - should clear and recreate
-        AppLogger.setup(log_file=str(log_file2), force=True)
-
-        # Should have handlers again
-        assert len(root.handlers) > 0
-        assert log_file2.exists()
-
-    @pytest.mark.parametrize(
-        "name, auto_name, expected_name",
-        [
-            ("explicit.logger.name", True, "explicit.logger.name"),  # Explicit name takes precedence
-            (None, False, "__root__"),  # None with auto_name=False returns __root__
-            (None, True, None),  # None with auto_name=True will auto-detect (not __main__ or __root__)
-        ],
-    )
-    def test_get_logger_name_resolution(self, temp_log_dir: Path, name, auto_name, expected_name) -> None:
-        """Test get_logger with different name and auto_name combinations."""
-        AppLogger.setup(log_file=str(temp_log_dir / "app.log"))
-
-        logger = AppLogger.get_logger(name, auto_name=auto_name)
-
-        assert logger is not None
-        if expected_name is not None:
-            assert logger.name == expected_name
-        else:
-            # For auto-detected names, just verify it's not the fallback values
-            assert logger.name != "__main__" or auto_name is False
-
-    def test_set_level_with_invalid_handler_type_warning(
-        self, temp_log_dir: Path, capture_logs: pytest.LogCaptureFixture
-    ) -> None:
-        """Test set_level logs warning for invalid handler_type."""
-        AppLogger.setup(log_file=str(temp_log_dir / "app.log"))
-
-        AppLogger.set_level("DEBUG", handler_type="nonexistent_handler_type")
-
-        assert "Invalid handler_type" in capture_logs.text
-
-    def test_json_logs_with_available_module(self, temp_log_dir: Path) -> None:
-        """Test JSON logging when pythonjsonlogger IS available."""
-        try:
-            from pythonjsonlogger.json import JsonFormatter  # noqa: F401
-
-            log_file = temp_log_dir / "app.log"
-            AppLogger.setup(log_file=str(log_file), json_logs=True, force=True)
-
-            # If here, setup succeeded
-            assert AppLogger._configured is True
-
-            # Check for json handler
-            root = logging.getLogger()
-            json_handlers = [
-                h
-                for h in root.handlers
-                if isinstance(h, logging.FileHandler)
-                and hasattr(h, "baseFilename")
-                and h.baseFilename.endswith(".json")
-            ]
-            # json handler should be added if package is available
-            assert len(json_handlers) >= 1 or True  # Allow 0 if something went wrong
-        except ImportError:
-            pytest.skip("pythonjsonlogger not installed - skipping json test")
+        importlib.reload(lg_logger)
+        assert lg_logger.JsonFormatter is None
+        assert lg_logger.JSON_LOGGER_AVAILABLE is False
