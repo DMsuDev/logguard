@@ -3,7 +3,7 @@ Module for custom exceptions for logguard.
 
 Recommended hierarchy:
 
-AppBaseError
+LogGuardError
 ├── ConfigurationError          - problems with config, .json/.env files, etc.
 │   └── MissingConfigError      - missing required env var or config key
 ├── ValidationError             - data/input validation failures
@@ -12,7 +12,7 @@ AppBaseError
     └── ForbiddenError          - permission denied (before PermissionError to avoid shadowing)
 
 Note: Can be expanded with more specific exceptions as needed
-Or modified to fit specific use cases, but all should inherit from AppBaseError.
+Or modified to fit specific use cases, but all should inherit from LogGuardError.
 
 Built-in exceptions are still in work.
 """
@@ -20,11 +20,13 @@ Built-in exceptions are still in work.
 from typing import Any
 
 
-class AppBaseError(Exception):
+class LogGuardError(Exception):
     """Base class for all custom exceptions of logguard.
 
     All application exceptions should inherit from this class
     (or one of its more specific subclasses) instead of Exception directly.
+
+    Supports exception chaining: raise MyError(...) from original_exc
 
     Attributes:
 
@@ -54,11 +56,17 @@ class AppBaseError(Exception):
 
     def to_dict(self) -> dict[str, Any]:
         """Convert the error to a dictionary (useful for JSON responses, logs, etc.)."""
-        return {
+        data: dict[str, Any] = {
             "type": self.__class__.__name__,
             "message": self.message,
-            "context": self.context,
+            "context": self.context.copy(),
         }
+        if self.__cause__ is not None:
+            data["cause"] = {
+                "type": self.__cause__.__class__.__name__,
+                "message": str(self.__cause__),
+            }
+        return data
 
 
 # ────────────────────────────────────────────────
@@ -66,7 +74,7 @@ class AppBaseError(Exception):
 # ────────────────────────────────────────────────
 
 
-class ConfigurationError(AppBaseError):
+class ConfigurationError(LogGuardError):
     """Error related to application configuration.
 
     Examples: invalid JSON file, missing environment variable,
@@ -89,7 +97,7 @@ class ConfigurationError(AppBaseError):
 
 
 class MissingConfigError(ConfigurationError):
-    """Missing a required configuration key."""
+    """Resource (file, directory, handler, etc.) could not be located."""
 
     def __init__(self, key: str, source: str = "config") -> None:
         super().__init__(
@@ -104,7 +112,7 @@ class MissingConfigError(ConfigurationError):
 # ────────────────────────────────────────────────
 
 
-class ValidationError(AppBaseError):
+class ValidationError(LogGuardError):
     """Data validation error or invalid state.
 
     Use when enforce/ASSERT fail or when validating user/API input.
@@ -130,7 +138,7 @@ class ValidationError(AppBaseError):
 # ────────────────────────────────────────────────
 
 
-class ResourceError(AppBaseError):
+class ResourceError(LogGuardError):
     """Base class for resource-related errors.
 
     Includes access issues, missing resources, authentication, permissions, etc.

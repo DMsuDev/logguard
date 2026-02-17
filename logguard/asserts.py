@@ -18,7 +18,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .exceptions import AppBaseError, ValidationError
+from .exceptions import ValidationError
 from .logger import AppLogger
 
 # Dedicated logger for assertions (easy to filter/rotate/monitor)
@@ -114,7 +114,7 @@ def enforce(
     line: int = 0,
     function: str = "<unknown function>",
     extra: dict[str, Any] | None = None,
-    exc_type: type[AppBaseError] = ValidationError,
+    exc_type: type[ValidationError] = ValidationError,
 ) -> None:
     """Explicitly checks a condition and calls the failure handler if it fails.
 
@@ -156,7 +156,7 @@ def ASSERT(
     message: str = "",
     *,
     extra: dict[str, Any] | None = None,
-    exc_type: type[AppBaseError] = ValidationError,
+    exc_type: type[ValidationError] = ValidationError,
 ) -> None:
     """Assertion with automatic source capture for expression and location.
 
