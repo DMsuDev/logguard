@@ -54,6 +54,7 @@ help:
 	@printf "  $(YELLOW)make test-cov$(NC)           Tests + HTML coverage report\n\n"
 	@printf "Code Quality:\n"
 	@printf "  $(YELLOW)make lint$(NC)               Run Ruff linter\n"
+	@printf "  $(YELLOW)make lint-fix$(NC)           Run Ruff with auto-fix\n"
 	@printf "  $(YELLOW)make format$(NC)             Format code with Ruff\n"
 	@printf "  $(YELLOW)make typecheck$(NC)          Run mypy type checker\n"
 	@printf "  $(YELLOW)make quality$(NC)            lint + typecheck\n"
@@ -78,20 +79,18 @@ help:
 # TESTING
 # ===========================================================================
 
-.PHONY: test
+.PHONY: test test-fast test-cov
 test:
 	@printf "$(YELLOW)Running tests with coverage...$(NC)\n"
 	@$(PYTHON) -m pytest $(TEST_DIR) -v --cov=$(SRC_DIR) --cov-report=term-missing --cov-report=html:$(COVERAGE_DIR)
 	@printf "$(GREEN)Tests completed$(NC)\n"
 	@printf "$(BLUE)Coverage report: $(COVERAGE_DIR)$(SEP)index.html$(NC)\n\n"
 
-.PHONY: test-fast
 test-fast:
 	@printf "$(YELLOW)Running fast tests (no coverage)...$(NC)\n"
 	@$(PYTHON) -m pytest $(TEST_DIR) -v
 	@printf "$(GREEN)Tests completed$(NC)\n\n"
 
-.PHONY: test-cov
 test-cov:
 	@printf "$(YELLOW)Running tests + HTML coverage report...$(NC)\n"
 	@$(PYTHON) -m pytest $(TEST_DIR) --cov=$(SRC_DIR) --cov-report=html:$(COVERAGE_DIR) --cov-report=term
@@ -102,30 +101,31 @@ test-cov:
 # CODE QUALITY
 # ===========================================================================
 
-.PHONY: lint
+.PHONY: lint lint-fix format typecheck quality pre-commit
 lint:
 	@printf "$(YELLOW)Running Ruff linter...$(NC)\n"
 	@$(PYTHON) -m ruff check $(SRC_DIR) $(EXAMPLES_DIR)
 	@printf "$(GREEN)Linting completed$(NC)\n\n"
 
-.PHONY: format
+lint-fix:
+	@printf "$(YELLOW)Running Ruff linter with auto-fix...$(NC)\n"
+	@$(PYTHON) -m ruff check --fix $(SRC_DIR) $(EXAMPLES_DIR)
+	@printf "$(GREEN)Linting and auto-fix completed$(NC)\n\n"
+
 format:
 	@printf "$(YELLOW)Formatting code with Ruff...$(NC)\n"
 	@$(PYTHON) -m ruff format $(SRC_DIR) $(EXAMPLES_DIR)
 	@$(PYTHON) -m ruff check --fix $(SRC_DIR) $(EXAMPLES_DIR)
 	@printf "$(GREEN)Code formatted$(NC)\n\n"
 
-.PHONY: typecheck
 typecheck:
 	@printf "$(YELLOW)Running mypy type checker...$(NC)\n"
 	@$(PYTHON) -m mypy $(SRC_DIR)
 	@printf "$(GREEN)Type checking completed$(NC)\n\n"
 
-.PHONY: quality
 quality: lint typecheck
 	@printf "$(GREEN)All quality checks passed$(NC)\n\n"
 
-.PHONY: pre-commit
 pre-commit:
 	@printf "$(YELLOW)Running pre-commit hooks on all files...$(NC)\n"
 	@pre-commit run --all-files
@@ -135,7 +135,8 @@ pre-commit:
 # CLEANUP
 # ===========================================================================
 
-.PHONY: clean
+.PHONY: clean clean-pycache clean-coverage clean-docs
+
 clean: clean-pycache clean-coverage clean-docs
 	@printf "$(YELLOW)Removing all artifacts...$(NC)\n"
 ifeq ($(DETECTED_OS),Windows)
@@ -152,7 +153,6 @@ else
 endif
 	@printf "$(GREEN)Cleaned all artifacts$(NC)\n\n"
 
-.PHONY: clean-pycache
 clean-pycache:
 	@printf "$(YELLOW)Removing Python cache files...$(NC)\n"
 ifeq ($(DETECTED_OS),Windows)
@@ -164,7 +164,6 @@ else
 endif
 	@printf "$(GREEN)Python cache cleaned$(NC)\n\n"
 
-.PHONY: clean-coverage
 clean-coverage:
 	@printf "$(YELLOW)Removing coverage reports...$(NC)\n"
 ifeq ($(DETECTED_OS),Windows)
@@ -176,7 +175,6 @@ else
 endif
 	@printf "$(GREEN)Coverage reports cleaned$(NC)\n\n"
 
-.PHONY: clean-docs
 clean-docs:
 	@printf "$(YELLOW)Removing documentation build...$(NC)\n"
 ifeq ($(DETECTED_OS),Windows)
@@ -190,14 +188,13 @@ endif
 # DOCUMENTATION
 # ===========================================================================
 
-.PHONY: docs
+.PHONY: docs docs-serve
 docs:
 	@printf "$(YELLOW)Building documentation with pdoc...$(NC)\n"
 	@$(MKDIR) $(DOCS_DIR)
 	@$(PYTHON) -m pdoc $(SRC_DIR) -o $(DOCS_DIR)
 	@printf "$(GREEN)Documentation generated in $(DOCS_DIR)$(NC)\n\n"
 
-.PHONY: docs-serve
 docs-serve:
 	@printf "$(YELLOW)Serving documentation on http://localhost:8080...$(NC)\n"
 	@printf "$(YELLOW)   Press Ctrl+C to stop$(NC)\n\n"
@@ -207,19 +204,17 @@ docs-serve:
 # INSTALL & PACKAGING
 # ===========================================================================
 
-.PHONY: install
+.PHONY: install install-dev build
 install:
 	@printf "$(YELLOW)Installing package in editable mode...$(NC)\n"
 	@$(PYTHON) -m pip install -e .
 	@printf "$(GREEN)Installation complete$(NC)\n\n"
 
-.PHONY: install-dev
 install-dev:
 	@printf "$(YELLOW)Installing with development dependencies...$(NC)\n"
 	@$(PYTHON) -m pip install -e ".[dev]"
 	@printf "$(GREEN)Dev installation complete$(NC)\n\n"
 
-.PHONY: build
 build:
 	@printf "$(YELLOW)Building sdist and wheel...$(NC)\n"
 	@$(PYTHON) -m build
