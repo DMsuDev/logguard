@@ -11,7 +11,7 @@ Logguard is a lightweight logging and assertion library designed to make it easy
 
 It is built on top of the `logging` and `rich` libraries for enhanced logging capabilities.
 
-## ⭐ Features
+## Features
 
 - **Easy Configuration**: Set up logging in one line with `AppLogger`
 - **File Rotation**: Automatic log rotation with configurable size and backup count
@@ -43,7 +43,7 @@ For JSON logging support:
 python -m pip install py-logguard[json]
 ```
 
-## 🚩 Quick Start
+## Quick Start
 
 <details>
 <summary>Logging</summary>
@@ -261,7 +261,7 @@ Requires: `pip install py-logguard[json]`
 
 <br>
 
-> **💡 Tip**: Check out [`examples/demo.py`](examples/demo.py) for a complete, interactive demonstration of all LogGuard features with Rich console output!
+> **Note**: Check out [`examples/demo.py`](examples/demo.py) for a complete, interactive demonstration of all LogGuard features with Rich console output!
 
 Run it with:
 
@@ -269,7 +269,7 @@ Run it with:
 python examples/demo.py
 ```
 
-## 📚 API Reference
+## API Reference
 
 <details>
 <summary><strong>AppLogger</strong> - Logging Configuration</summary>
@@ -366,12 +366,12 @@ All exceptions inherit from `LogGuardError` and include rich context information
 
 </details>
 
-## 🤝 Contributing
+## Contributing
 
 Contributions, issues and feature requests are welcome.
 Feel free to check the issues page.
 
-## 📜 License
+## License
 
 [![License](https://img.shields.io/badge/License-MIT-green?style=flat)](LICENSE)
 
