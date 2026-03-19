@@ -1,17 +1,18 @@
-name: CodeQL
+name: "CodeQL"
 
 on:
+  workflow_dispatch:
   push:
     branches: [main]
   pull_request:
-    # The branches below must be a subset of the branches above
-    branches: [main]
-  schedule:
-    - cron: "0 2 * * 0" # Weekly on Sunday at 2 AM UTC
+    branches: ['*']
+
+permissions:
+  contents: read
 
 jobs:
   analyze:
-    name: Analyze
+    name: CodeQL Analysis
     runs-on: ubuntu-latest
 
     permissions:
@@ -19,24 +20,14 @@ jobs:
       contents: read
       security-events: write
 
-    strategy:
-      fail-fast: false
-      matrix:
-        language: [python]
-        # CodeQL supports [ 'cpp', 'csharp', 'go', 'java', 'javascript', 'python', 'ruby' ]
-        # Use only 'java' to analyze code written in Java, Kotlin or both
-        # Use only 'javascript' to analyze code written in JavaScript, TypeScript or both
-        # Learn more about CodeQL language support at https://aka.ms/codeql-docs/language-support
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
         with:
-          languages: ${{ matrix.language }}
+          languages: python
           # If you wish to specify custom queries, you can do so here or in a config file.
 
           # For more details on CodeQL's query packs, refer to: https://docs.github.com/en/code-security/code-scanning/automatically-scanning-your-code-for-vulnerabilities-and-errors/configuring-code-scanning#using-queries-in-ql-packs
@@ -45,7 +36,19 @@ jobs:
           # Use the security-and-quality query pack, which includes a broad set of queries for both security and code quality issues.
           queries: security-and-quality
 
-      - name: Perform CodeQL Analysis
+      - name: Analyze
         uses: github/codeql-action/analyze@v3
+
+  codespell:
+    name: Spell Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run codespell
+        uses: codespell-project/actions-codespell@v2
         with:
-          category: "/language:${{matrix.language}}"
+          skip: build,dist,__pycache__,*.lock,.git,.venv
+          ignore_words_list: nd,ot,te
+          check_filenames: true
