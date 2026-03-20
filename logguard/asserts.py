@@ -1,7 +1,4 @@
-"""
-Advanced Assertion System for LogGuard.
-
-Environment-aware, extensible and closed for modification.
+"""Assertion System for LogGuard.
 
 This module provides a flexible assertion system that adapts its behavior
 based on the application environment (development vs production).
@@ -24,23 +21,29 @@ Specialized helpers (all use ASSERT behavior):
     ASSERT_NOT_EMPTY        -> Validates value is truthy (not empty)
     ASSERT_IN               -> Validates item is in container
 
-Example:
-    >>> from logguard.asserts import ASSERT, CHECK, AssertionManager
-    >>> AssertionManager.configure(AssertionConfig(environment="development"))
-    >>> CHECK(user is not None, "User required", user_id=123)
-    >>> ASSERT(age > 0, "Age must be positive", age=age)
+Example::
+
+    from logguard.asserts import ASSERT, CHECK, AssertionManager
+
+    AssertionManager.configure(AssertionConfig(environment="development"))
+    CHECK(user is not None, "User required", user_id=123)
+    ASSERT(age > 0, "Age must be positive", age=age)
 
 Configuration:
-    Set APP_ENV environment variable to control behavior:
-    - "development", "dev", "local", "test" -> Development mode (raises)
-    - "production", "prod" -> Production mode (logs only for ENSURE/VERIFY)
+
+    Set ``APP_ENV`` environment variable to control behavior:
+
+    - ``"development"``, ``"dev"``, ``"local"``, ``"test"`` -> Development mode (raises)
+    - ``"production"``, ``"prod"`` -> Production mode (logs only for ENSURE/VERIFY)
 """
 
 from __future__ import annotations
 
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass
+from enum import Enum
 from typing import Any
 
 from .exceptions import (
@@ -53,29 +56,58 @@ from .exceptions import (
     RangeError,
     TypeErrorAssert,
 )
-from .logger import AppLogger
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
+# Assertion Mode
+# ========================================================================
+
+
+class AssertionMode(str, Enum):
+    """Assertion evaluation modes.
+
+    Controls how the assertion engine handles failed conditions depending on
+    the current environment.
+
+    Members:
+        RAISE: Always raise an exception (used by :func:`CHECK`).
+        DEBUG_ONLY: Raise in development when ``enable_asserts`` is ``True``;
+            completely skipped otherwise (used by :func:`ASSERT`).
+        DEV_RAISE: Raise in development, log in production
+            (used by :func:`ENSURE` / :func:`VERIFY`).
+    """
+
+    RAISE = "raise"
+    DEBUG_ONLY = "debug_only"
+    DEV_RAISE = "dev_raise"
+
+
+# ========================================================================
 # Configuration
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 @dataclass(frozen=True)
 class AssertionConfig:
-    """
-    Configuration for the assertion system.
+    """Configuration for the assertion system.
 
     Attributes:
         environment: Current environment name. Controls assertion behavior.
-            Values like "dev", "development", "local", "test" enable strict mode.
-            Values like "prod", "production" enable lenient mode.
-        enable_asserts: Master switch to enable/disable ASSERT evaluations.
-            When False, ASSERT calls are completely skipped.
+            Values like ``"dev"``, ``"development"``, ``"local"``, ``"test"``
+            enable strict mode.  Values like ``"prod"``, ``"production"``
+            enable lenient mode.
+        enable_asserts: Master switch to enable/disable ``ASSERT`` evaluations.
+            When ``False``, ``ASSERT`` calls are completely skipped.
 
-    Example:
-        >>> config = AssertionConfig(environment="production", enable_asserts=True)
-        >>> AssertionManager.configure(config)
+    Example::
+
+        config = AssertionConfig(environment="production", enable_asserts=True)
+        AssertionManager.configure(config)
     """
+
+    #: Recognized environments that map to *development* mode.
+    DEV_ENVIRONMENTS: tuple[str, ...] = ("dev", "development", "local", "test")
+    #: Recognized environments that map to *production* mode.
+    PROD_ENVIRONMENTS: tuple[str, ...] = ("prod", "production", "staging")
 
     environment: str = "development"
     enable_asserts: bool = True
@@ -110,15 +142,14 @@ def _default_log_strategy(
     context: dict[str, Any],
     exception_class: type[AssertFailure] = AssertFailure,
 ) -> None:
-    """
-    Default strategy that logs assertion failures without raising.
+    """Default strategy that logs assertion failures without raising.
 
     Args:
         message: Error message describing the failure.
         context: Additional context data for debugging.
         exception_class: The exception class (used for logging type info).
     """
-    logger = AppLogger.get_logger("logguard.assertions")
+    logger = logging.getLogger("logguard.assertions")
     logger.error(
         "[ASSERTION FAILED] %s | type=%s | context=%s",
         message,
@@ -127,9 +158,9 @@ def _default_log_strategy(
     )
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # Assertion Manager
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 class AssertionManager:
@@ -163,7 +194,7 @@ class AssertionManager:
     _raise_strategy: FailureStrategy = _default_raise_strategy
     _log_strategy: FailureStrategy = _default_log_strategy
 
-    # ─────────────────────────────────────────
+    # -----------------------------------------
 
     @classmethod
     def configure(cls, config: AssertionConfig) -> None:
@@ -224,17 +255,17 @@ class AssertionManager:
         cls._raise_strategy = _default_raise_strategy
         cls._log_strategy = _default_log_strategy
 
-    # ─────────────────────────────────────────
+    # -----------------------------------------
 
     @classmethod
     def _is_dev(cls) -> bool:
         """Check if running in development environment."""
-        return cls._config.environment in ("dev", "development", "local", "test")
+        return cls._config.environment in AssertionConfig.DEV_ENVIRONMENTS
 
     @classmethod
     def _is_prod(cls) -> bool:
         """Check if running in production environment."""
-        return cls._config.environment in ("prod", "production")
+        return cls._config.environment in AssertionConfig.PROD_ENVIRONMENTS
 
     @classmethod
     def _handle(
@@ -243,46 +274,47 @@ class AssertionManager:
         condition: bool,
         message: str,
         context: dict[str, Any],
-        mode: str,
+        mode: AssertionMode | str,
         exception_class: type[AssertFailure] = AssertFailure,
     ) -> None:
-        """
-        Internal handler for assertion evaluation.
+        """Internal handler for assertion evaluation.
 
         Args:
-            condition: The condition to evaluate. If True, assertion passes.
+            condition: The condition to evaluate. If ``True``, assertion passes.
             message: Error message if assertion fails.
             context: Additional context for debugging.
-            mode: Assertion mode ("raise", "dev_raise", "debug_only").
+            mode: Assertion mode (:class:`AssertionMode` or legacy string).
             exception_class: Exception class to raise on failure.
 
         Raises:
-            AssertFailure: Or subclass if condition is False and mode requires raising.
+            AssertFailure: Or subclass if condition is ``False`` and mode requires raising.
             ValueError: If an unknown mode is specified.
         """
         if condition:
             return
 
-        if mode == "raise":
+        # Accept both enum values and legacy strings
+        try:
+            mode = AssertionMode(mode)
+        except ValueError:
+            raise ValueError(f"Unknown assertion mode: {mode}") from None
+
+        if mode is AssertionMode.RAISE:
             cls._raise_strategy(message, context, exception_class)
 
-        elif mode == "dev_raise":
+        elif mode is AssertionMode.DEV_RAISE:
             if cls._is_dev():
                 cls._raise_strategy(message, context, exception_class)
             else:
                 cls._log_strategy(message, context, exception_class)
 
-        elif mode == "debug_only":
-            if cls._is_dev() and cls._config.enable_asserts:
-                cls._raise_strategy(message, context, exception_class)
-
-        else:
-            raise ValueError(f"Unknown assertion mode: {mode}")
+        elif mode is AssertionMode.DEBUG_ONLY and cls._is_dev() and cls._config.enable_asserts:
+            cls._raise_strategy(message, context, exception_class)
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # Base Assertions
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def CHECK(condition: bool, message: str = "", **context: Any) -> None:
@@ -308,7 +340,7 @@ def CHECK(condition: bool, message: str = "", **context: Any) -> None:
         condition=condition,
         message=message or "CHECK failed",
         context=context,
-        mode="raise",
+        mode=AssertionMode.RAISE,
         exception_class=AssertFailure,
     )
 
@@ -337,7 +369,7 @@ def ASSERT(condition: bool, message: str = "", **context: Any) -> None:
         condition=condition,
         message=message or "ASSERT failed",
         context=context,
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=AssertFailure,
     )
 
@@ -368,7 +400,7 @@ def ENSURE(condition: bool, message: str = "", **context: Any) -> None:
         condition=condition,
         message=message or "ENSURE failed",
         context=context,
-        mode="dev_raise",
+        mode=AssertionMode.DEV_RAISE,
         exception_class=AssertFailure,
     )
 
@@ -399,14 +431,14 @@ def VERIFY(condition: bool, message: str = "", **context: Any) -> None:
         condition=condition,
         message=message or "VERIFY failed",
         context=context,
-        mode="dev_raise",
+        mode=AssertionMode.DEV_RAISE,
         exception_class=AssertFailure,
     )
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # Specialized Assertions
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def ASSERT_NOT_NULL(value: Any, message: str = "") -> None:
@@ -428,7 +460,7 @@ def ASSERT_NOT_NULL(value: Any, message: str = "") -> None:
         condition=value is not None,
         message=message or "Value must not be None",
         context={"value": value},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=NullError,
     )
 
@@ -453,7 +485,7 @@ def ASSERT_NULL(value: Any, message: str = "") -> None:
         condition=value is None,
         message=message or "Value must be None",
         context={"value": value},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=NullError,
     )
 
@@ -478,7 +510,7 @@ def ASSERT_EQUALS(actual: Any, expected: Any, message: str = "") -> None:
         condition=actual == expected,
         message=message or f"Expected {expected!r}, got {actual!r}",
         context={"actual": actual, "expected": expected},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=EqualsError,
     )
 
@@ -503,7 +535,7 @@ def ASSERT_GREATER(a: Any, b: Any, message: str = "") -> None:
         condition=a > b,
         message=message or f"{a} is not greater than {b}",
         context={"a": a, "b": b},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=ComparisonError,
     )
 
@@ -528,7 +560,7 @@ def ASSERT_LESS(a: Any, b: Any, message: str = "") -> None:
         condition=a < b,
         message=message or f"{a} is not less than {b}",
         context={"a": a, "b": b},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=ComparisonError,
     )
 
@@ -559,7 +591,7 @@ def ASSERT_IN_RANGE(
         condition=min_value <= value <= max_value,
         message=message or f"{value} not in range [{min_value}, {max_value}]",
         context={"value": value, "min": min_value, "max": max_value},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=RangeError,
     )
 
@@ -591,7 +623,7 @@ def ASSERT_BETWEEN_EXCLUSIVE(
         condition=min_value < value < max_value,
         message=message or f"{value} not in exclusive range ({min_value}, {max_value})",
         context={"value": value, "min": min_value, "max": max_value},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=RangeError,
     )
 
@@ -616,7 +648,7 @@ def ASSERT_TYPE(value: Any, expected: type | tuple[type, ...], message: str = ""
         condition=isinstance(value, expected),
         message=message or f"Expected type {expected}, got {type(value)}",
         context={"value": value, "expected": expected, "actual": type(value)},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=TypeErrorAssert,
     )
 
@@ -645,7 +677,7 @@ def ASSERT_NOT_EMPTY(value: Any, message: str = "") -> None:
             "value": value,
             "length": len(value) if hasattr(value, "__len__") else None,
         },
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=EmptyError,
     )
 
@@ -670,6 +702,6 @@ def ASSERT_IN(item: Any, container: Any, message: str = "") -> None:
         condition=item in container,
         message=message or f"{item!r} not found in container",
         context={"item": item, "container_type": type(container).__name__},
-        mode="debug_only",
+        mode=AssertionMode.DEBUG_ONLY,
         exception_class=MembershipError,
     )

@@ -53,6 +53,7 @@ if TYPE_CHECKING:
     from .asserts import ASSERT as ASSERT
     from .asserts import AssertionConfig as AssertionConfig
     from .asserts import AssertionManager as AssertionManager
+    from .asserts import AssertionMode as AssertionMode
     from .asserts import CHECK as CHECK
     from .asserts import ENSURE as ENSURE
     from .asserts import VERIFY as VERIFY
@@ -107,6 +108,7 @@ __all__ = [  # noqa: RUF022
     "ASSERT",
     "AssertionConfig",
     "AssertionManager",
+    "AssertionMode",
     "CHECK",
     "ENSURE",
     "VERIFY",
@@ -142,9 +144,9 @@ __all__ = [  # noqa: RUF022
     "ResourceNotFoundError",
 ]
 
-# ───────────────────────────────
+# -------------------------------
 # Symbol to submodule mapping
-# ───────────────────────────────
+# -------------------------------
 
 _SYMBOL_TO_MODULE: dict[str, str] = {
     # Logger
@@ -153,6 +155,7 @@ _SYMBOL_TO_MODULE: dict[str, str] = {
     "ASSERT": "asserts",
     "AssertionConfig": "asserts",
     "AssertionManager": "asserts",
+    "AssertionMode": "asserts",
     "CHECK": "asserts",
     "ENSURE": "asserts",
     "VERIFY": "asserts",
@@ -189,9 +192,9 @@ _SYMBOL_TO_MODULE: dict[str, str] = {
 }
 
 
-# ───────────────────────────────
+# -------------------------------
 # Lazy import helpers
-# ───────────────────────────────
+# -------------------------------
 
 
 def _lazy_import(submodule: str) -> Any:
