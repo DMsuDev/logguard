@@ -39,43 +39,6 @@ DOCS_DIR     := $(ARTIFACTS_DIR)$(SEP)docs
 .DEFAULT_GOAL := help
 
 # ===========================================================================
-# HELP
-# ===========================================================================
-
-.PHONY: help
-help:
-	@printf "$(BLUE)Logguard Development Makefile$(NC)\n"
-	@printf "====================================\n\n"
-	@printf "Available commands:\n"
-	@printf "  $(YELLOW)make help$(NC)               Show this help\n\n"
-	@printf "Testing:\n"
-	@printf "  $(YELLOW)make test$(NC)               Run tests with coverage\n"
-	@printf "  $(YELLOW)make test-fast$(NC)          Run tests without coverage\n"
-	@printf "  $(YELLOW)make test-cov$(NC)           Tests + HTML coverage report\n\n"
-	@printf "Code Quality:\n"
-	@printf "  $(YELLOW)make lint$(NC)               Run Ruff linter\n"
-	@printf "  $(YELLOW)make lint-fix$(NC)           Run Ruff with auto-fix\n"
-	@printf "  $(YELLOW)make format$(NC)             Format code with Ruff\n"
-	@printf "  $(YELLOW)make typecheck$(NC)          Run mypy type checker\n"
-	@printf "  $(YELLOW)make quality$(NC)            lint + typecheck\n"
-	@printf "  $(YELLOW)make pre-commit$(NC)         Run pre-commit hooks\n\n"
-	@printf "Cleanup:\n"
-	@printf "  $(YELLOW)make clean$(NC)              Remove all build artifacts\n\n"
-	@printf "  $(YELLOW)make clean-pycache$(NC)      Remove Python cache files\n\n"
-	@printf "  $(YELLOW)make clean-coverage$(NC)     Remove coverage reports\n\n"
-	@printf "  $(YELLOW)make clean-docs$(NC)         Remove documentation build\n\n"
-	@printf "Documentation:\n"
-	@printf "  $(YELLOW)make docs$(NC)               Build documentation with pdoc\n"
-	@printf "  $(YELLOW)make docs-serve$(NC)         Serve live docs (localhost:8080)\n\n"
-	@printf "Installation & Packaging:\n"
-	@printf "  $(YELLOW)make install$(NC)            Install in editable mode\n"
-	@printf "  $(YELLOW)make install-dev$(NC)        Install with dev dependencies\n"
-	@printf "  $(YELLOW)make build$(NC)              Build sdist + wheel\n"
-	@printf "  $(YELLOW)make publish-test$(NC)       Upload to TestPyPI\n"
-	@printf "  $(YELLOW)make publish$(NC)            Upload to PyPI\n\n"
-	@printf "Detected OS: $(DETECTED_OS)\n\n"
-
-# ===========================================================================
 # TESTING
 # ===========================================================================
 
@@ -101,29 +64,34 @@ test-cov:
 # CODE QUALITY
 # ===========================================================================
 
-.PHONY: lint lint-fix format typecheck quality pre-commit
+.PHONY: lint lint-fix format format-check typecheck quality pre-commit
 lint:
 	@printf "$(YELLOW)Running Ruff linter...$(NC)\n"
-	@$(PYTHON) -m ruff check $(SRC_DIR) $(EXAMPLES_DIR)
+	@$(PYTHON) -m ruff check $(SRC_DIR) $(TEST_DIR) $(EXAMPLES_DIR)
 	@printf "$(GREEN)Linting completed$(NC)\n\n"
 
 lint-fix:
 	@printf "$(YELLOW)Running Ruff linter with auto-fix...$(NC)\n"
-	@$(PYTHON) -m ruff check --fix $(SRC_DIR) $(EXAMPLES_DIR)
+	@$(PYTHON) -m ruff check --fix $(SRC_DIR) $(TEST_DIR) $(EXAMPLES_DIR)
 	@printf "$(GREEN)Linting and auto-fix completed$(NC)\n\n"
 
 format:
 	@printf "$(YELLOW)Formatting code with Ruff...$(NC)\n"
-	@$(PYTHON) -m ruff format $(SRC_DIR) $(EXAMPLES_DIR)
-	@$(PYTHON) -m ruff check --fix $(SRC_DIR) $(EXAMPLES_DIR)
+	@$(PYTHON) -m ruff format $(SRC_DIR) $(TEST_DIR) $(EXAMPLES_DIR)
+	@$(PYTHON) -m ruff check --fix $(SRC_DIR) $(TEST_DIR) $(EXAMPLES_DIR)
 	@printf "$(GREEN)Code formatted$(NC)\n\n"
+
+format-check:
+	@printf "$(YELLOW)Checking code formatting...$(NC)\n"
+	@$(PYTHON) -m ruff format --check $(SRC_DIR) $(TEST_DIR) $(EXAMPLES_DIR)
+	@printf "$(GREEN)Formatting check passed$(NC)\n\n"
 
 typecheck:
 	@printf "$(YELLOW)Running mypy type checker...$(NC)\n"
 	@$(PYTHON) -m mypy $(SRC_DIR)
 	@printf "$(GREEN)Type checking completed$(NC)\n\n"
 
-quality: lint typecheck
+quality: lint format-check typecheck
 	@printf "$(GREEN)All quality checks passed$(NC)\n\n"
 
 pre-commit:
@@ -215,23 +183,60 @@ install-dev:
 	@$(PYTHON) -m pip install -e ".[dev]"
 	@printf "$(GREEN)Dev installation complete$(NC)\n\n"
 
-build:
+build: clean
 	@printf "$(YELLOW)Building sdist and wheel...$(NC)\n"
 	@$(PYTHON) -m build
 	@printf "$(GREEN)Build complete$(NC)\n\n"
 
 # ===========================================================================
-# Publish targets
+# PUBLISH
 # ===========================================================================
 
-.PHONY: publish-test
+.PHONY: publish-test publish
 publish-test: build
 	@printf "$(YELLOW)Uploading to TestPyPI...$(NC)\n"
 	@$(PYTHON) -m twine upload --repository testpypi dist/*
 	@printf "$(GREEN)Upload to TestPyPI complete$(NC)\n\n"
 
-.PHONY: publish
 publish: build
 	@printf "$(YELLOW)Uploading to PyPI...$(NC)\n"
 	@$(PYTHON) -m twine upload dist/*
 	@printf "$(GREEN)Upload to PyPI complete$(NC)\n\n"
+
+# ===========================================================================
+# HELP
+# ===========================================================================
+
+.PHONY: help
+help:
+	@printf "$(BLUE)Logguard Development Makefile$(NC)\n"
+	@printf "====================================\n\n"
+	@printf "Available commands:\n"
+	@printf "  $(YELLOW)make help$(NC)               Show this help\n\n"
+	@printf "Testing:\n"
+	@printf "  $(YELLOW)make test$(NC)               Run tests with coverage\n"
+	@printf "  $(YELLOW)make test-fast$(NC)          Run tests without coverage\n"
+	@printf "  $(YELLOW)make test-cov$(NC)           Tests + HTML coverage report\n\n"
+	@printf "Code Quality:\n"
+	@printf "  $(YELLOW)make lint$(NC)               Run Ruff linter\n"
+	@printf "  $(YELLOW)make lint-fix$(NC)           Run Ruff with auto-fix\n"
+	@printf "  $(YELLOW)make format$(NC)             Format code with Ruff\n"
+	@printf "  $(YELLOW)make format-check$(NC)       Check formatting without changes\n"
+	@printf "  $(YELLOW)make typecheck$(NC)          Run mypy type checker\n"
+	@printf "  $(YELLOW)make quality$(NC)            lint + format-check + typecheck\n"
+	@printf "  $(YELLOW)make pre-commit$(NC)         Run pre-commit hooks\n\n"
+	@printf "Cleanup:\n"
+	@printf "  $(YELLOW)make clean$(NC)              Remove all build artifacts\n"
+	@printf "  $(YELLOW)make clean-pycache$(NC)      Remove Python cache files\n"
+	@printf "  $(YELLOW)make clean-coverage$(NC)     Remove coverage reports\n"
+	@printf "  $(YELLOW)make clean-docs$(NC)         Remove documentation build\n\n"
+	@printf "Documentation:\n"
+	@printf "  $(YELLOW)make docs$(NC)               Build documentation with pdoc\n"
+	@printf "  $(YELLOW)make docs-serve$(NC)         Serve live docs (localhost:8080)\n\n"
+	@printf "Installation & Packaging:\n"
+	@printf "  $(YELLOW)make install$(NC)            Install in editable mode\n"
+	@printf "  $(YELLOW)make install-dev$(NC)        Install with dev dependencies\n"
+	@printf "  $(YELLOW)make build$(NC)              Build sdist + wheel\n"
+	@printf "  $(YELLOW)make publish-test$(NC)       Upload to TestPyPI\n"
+	@printf "  $(YELLOW)make publish$(NC)            Upload to PyPI\n\n"
+	@printf "Detected OS: $(DETECTED_OS)\n\n"
