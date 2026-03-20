@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import inspect
 import logging
+from enum import Enum
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -29,7 +30,7 @@ try:
     from rich.logging import RichHandler
 
     RICH_AVAILABLE = True
-except ImportError:  # pragma: no cover
+except ImportError:
     Console = None  # type: ignore[assignment,misc]
     RichHandler = None  # type: ignore[assignment,misc]
     RICH_AVAILABLE = False
@@ -44,6 +45,26 @@ except ImportError:
 
 if TYPE_CHECKING:
     pass
+
+
+class HandlerType(str, Enum):
+    """Selects which logging handlers an operation targets.
+
+    Each member's value is the plain string accepted by the underlying API,
+    so ``HandlerType.ALL == "all"`` is always ``True``.
+    """
+
+    ALL = "all"
+    """Target every handler attached to the logger."""
+
+    CONSOLE = "console"
+    """Target only console (stream / RichHandler) handlers."""
+
+    FILE = "file"
+    """Target only :class:`~logging.handlers.RotatingFileHandler` handlers."""
+
+    JSON = "json"
+    """Target only JSON-formatted file handlers created by AppLogger."""
 
 
 class AppLogger:
@@ -214,6 +235,7 @@ class AppLogger:
             encoding="utf-8",
             delay=delay,  # Delay file creation until the first log message
         )
+        handler.name = "file"
         handler.setLevel(level)
 
         # Format for file logs (includes logger name and thread info)
@@ -256,6 +278,7 @@ class AppLogger:
             )
 
         handler = logging.StreamHandler()
+        handler.name = "console"
         handler.setLevel(level)
         handler.setFormatter(
             logging.Formatter(
@@ -300,6 +323,7 @@ class AppLogger:
             delay=delay,
         )
         json_handler.setLevel(level)
+        json_handler.name = "json"
         json_handler.setFormatter(
             JsonFormatter(
                 fmt=(
@@ -312,6 +336,46 @@ class AppLogger:
             )
         )
         return json_handler
+
+    @classmethod
+    def _find_handlers(
+        cls,
+        handler_type: HandlerType | str = HandlerType.ALL,
+        logger_name: str | None = None,
+    ) -> list[logging.Handler]:
+        """Return handlers from a logger that match the specified type.
+
+        Args:
+            handler_type: Which handlers to select. Accepts a :class:`HandlerType`
+                member or the equivalent plain string (``'all'``, ``'console'``,
+                ``'file'``).
+            logger_name: Specific logger name, or None for root logger.
+
+        Returns:
+            List of matching :class:`logging.Handler` instances.
+            Returns an empty list and logs a warning for unknown handler types.
+        """
+        target_logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
+
+        if handler_type == HandlerType.ALL:
+            return list(target_logger.handlers)
+
+        if handler_type == HandlerType.CONSOLE:
+            console_types = (logging.StreamHandler,) if RichHandler is None else (logging.StreamHandler, RichHandler)
+            return [
+                h
+                for h in target_logger.handlers
+                if isinstance(h, console_types) and not isinstance(h, RotatingFileHandler)
+            ]
+
+        if handler_type == HandlerType.FILE:
+            return [h for h in target_logger.handlers if isinstance(h, RotatingFileHandler)]
+
+        logging.warning(
+            "Invalid handler_type %r. Use HandlerType.ALL, HandlerType.CONSOLE, or HandlerType.FILE.",
+            handler_type,
+        )
+        return []
 
     @classmethod
     def silence_noisy_libraries(cls, modules: list[str] | None = None) -> None:
@@ -363,40 +427,61 @@ class AppLogger:
     def set_level(
         cls,
         level: str | int,
-        handler_type: str = "all",
+        handler_type: HandlerType | str = HandlerType.ALL,
         logger_name: str | None = None,
     ) -> None:
         """Dynamically change log level without reconfiguring.
 
         Args:
             level: New log level (e.g., 'DEBUG', 'INFO', logging.DEBUG).
-            handler_type: Which handlers to update ('all', 'console', 'file').
+            handler_type: Which handlers to update. Accepts a :class:`HandlerType`
+                member or the equivalent plain string.
             logger_name: Specific logger name, or None for root logger.
         """
         level = cls._resolve_level(level)
 
-        target_logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
-
-        if handler_type == "all":
+        if handler_type == HandlerType.ALL:
+            target_logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
             target_logger.setLevel(level)
-            for handler in target_logger.handlers:
-                handler.setLevel(level)
 
-        elif handler_type == "console":
-            console_handler_types = (
-                (logging.StreamHandler,) if RichHandler is None else (logging.StreamHandler, RichHandler)
-            )
-            for handler in target_logger.handlers:
-                if isinstance(handler, console_handler_types) and not isinstance(handler, RotatingFileHandler):
-                    handler.setLevel(level)
+        for handler in cls._find_handlers(handler_type, logger_name):
+            handler.setLevel(level)
 
-        elif handler_type == "file":
-            for handler in target_logger.handlers:
-                if isinstance(handler, RotatingFileHandler):
-                    handler.setLevel(level)
+    @classmethod
+    def set_format(
+        cls,
+        format_string: str,
+        handler_type: HandlerType | str = HandlerType.ALL,
+        logger_name: str | None = None,
+        datefmt: str | None = None,
+    ) -> None:
+        """Change the format string of existing logging handlers.
 
-        else:
-            logging.warning("Invalid handler_type %r. Use 'all', 'console', or 'file'.", handler_type)
+        RichHandler instances are skipped because they use their own rendering
+        pipeline and do not respect a standard :class:`logging.Formatter`.
+
+        Args:
+            format_string: New log format string (e.g., ``'%(levelname)s - %(message)s'``).
+            handler_type: Which handlers to update. Accepts a :class:`HandlerType`
+                member or the equivalent plain string.
+            logger_name: Specific logger name, or ``None`` for the root logger.
+            datefmt: Date/time format string (e.g., ``'%H:%M:%S'``). Optional.
+        """
+        formatter = logging.Formatter(format_string, datefmt=datefmt)
+        for handler in cls._find_handlers(handler_type, logger_name):
+            if RICH_AVAILABLE and RichHandler is not None and isinstance(handler, RichHandler):
+                logging.getLogger(logger_name).warning(
+                    "Cannot change format of RichHandler instances. Skipping handler %r.",
+                    handler,
+                )
+                continue  # RichHandler renders with its own pipeline; formatter has no effect
+            if JSON_LOGGER_AVAILABLE and JsonFormatter is not None and isinstance(handler.formatter, JsonFormatter):
+                logging.getLogger(logger_name).warning(
+                    "Cannot change format of JsonFormatter instances. Skipping handler %r.",
+                    handler,
+                )
+                continue  # JsonFormatter has its own structure; standard formatter won't work
+            handler.setFormatter(formatter)
 
     @classmethod
     def reset(cls) -> None:

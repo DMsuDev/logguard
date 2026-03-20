@@ -48,6 +48,7 @@ if TYPE_CHECKING:
 
     # Logger
     from .logger import AppLogger as AppLogger
+    from .logger import HandlerType as HandlerType
 
     # Assertions - core
     from .asserts import ASSERT as ASSERT
@@ -104,6 +105,7 @@ __all__ = [  # noqa: RUF022
     "logger",
     # Logger
     "AppLogger",
+    "HandlerType",
     # Assertions - core
     "ASSERT",
     "AssertionConfig",
@@ -151,6 +153,7 @@ __all__ = [  # noqa: RUF022
 _SYMBOL_TO_MODULE: dict[str, str] = {
     # Logger
     "AppLogger": "logger",
+    "HandlerType": "logger",
     # Assertions - core
     "ASSERT": "asserts",
     "AssertionConfig": "asserts",
