@@ -15,7 +15,7 @@ from unittest import mock
 
 import pytest
 
-from logguard.logger import AppLogger
+from logguard.logger import AppLogger, HandlerType, JsonFormatter
 
 
 # ──────────── Helpers ────────────
@@ -53,37 +53,79 @@ def test_setup_defaults_no_args() -> None:
 
 # ──────────── Handlers & Levels ────────────
 @pytest.mark.parametrize(
-    "handler_type,expected",
+    "level_input, handler_type_input, expected_console, expected_file, expected_root, expected_log_fragment",
     [
-        ("console", (logging.DEBUG, None)),
-        ("file", (None, logging.ERROR)),
-        ("all", (logging.WARNING, logging.WARNING)),
+        pytest.param(
+            "DEBUG", HandlerType.CONSOLE, logging.DEBUG, None, None, None, id="valid-console"),
+        pytest.param(
+            "ERROR", HandlerType.FILE, None, logging.ERROR, None, None, id="valid-file"),
+        pytest.param(
+            "WARNING", HandlerType.ALL, logging.WARNING, logging.WARNING, logging.WARNING, None, id="valid-all"),
+        pytest.param(
+            "NONEXISTENT", HandlerType.ALL, logging.DEBUG, logging.DEBUG, logging.DEBUG, None, id="invalid-level"),
+        pytest.param("DEBUG", "bad_type", None, None, None, "Invalid handler_type", id="invalid-handler-type"),
     ],
 )
-def test_set_level_variants(temp_log_dir: Path, handler_type: str, expected: tuple[int | None, int | None]) -> None:
-    _setup(temp_log_dir, file_level="WARNING")
-    console_level, file_level = expected
-    if handler_type == "console":
-        AppLogger.set_level("DEBUG", handler_type="console")
-    elif handler_type == "file":
-        AppLogger.set_level("ERROR", handler_type="file")
-    else:
-        AppLogger.set_level("WARNING", handler_type="all")
+def test_set_level(
+    temp_log_dir: Path,
+    level_input: str,
+    handler_type_input: HandlerType | str,
+    expected_console: int | None,
+    expected_file: int | None,
+    expected_root: int | None,
+    expected_log_fragment: str | None,
+) -> None:
+    log_file = _setup(temp_log_dir, file_level="WARNING")
+    AppLogger.set_level(level_input, handler_type=handler_type_input)
 
     root = logging.getLogger()
     for h in root.handlers:
-        if isinstance(h, RotatingFileHandler) and file_level is not None:
-            assert h.level == file_level
-        elif not isinstance(h, RotatingFileHandler) and console_level is not None:
-            assert h.level == console_level
-    if handler_type == "all":
-        assert root.level == logging.WARNING
+        if isinstance(h, RotatingFileHandler) and expected_file is not None:
+            assert h.level == expected_file
+        elif not isinstance(h, RotatingFileHandler) and expected_console is not None:
+            assert h.level == expected_console
+
+    if expected_root is not None:
+        assert root.level == expected_root
+
+    if expected_log_fragment is not None:
+        _flush()
+        assert expected_log_fragment in log_file.read_text()
 
 @pytest.mark.parametrize("level_input", ["INVALID", 12345, [], {}])
 def test_resolve_level_invalid(level_input: Any) -> None:
     """_resolve_level returns DEBUG for invalid inputs."""
     assert AppLogger._resolve_level(level_input) == logging.DEBUG
 
+@pytest.mark.parametrize(
+    "handler_type",
+    [
+        HandlerType.CONSOLE,
+        HandlerType.FILE,
+        HandlerType.ALL,
+        "none",
+        "unknown",
+    ],
+)
+def test_find_handlers_types(temp_log_dir: Path, handler_type: HandlerType | str) -> None:
+    _setup(temp_log_dir)
+    handlers = AppLogger._find_handlers(handler_type)
+
+    if handler_type == HandlerType.CONSOLE:
+        assert handlers
+        for h in handlers:
+            assert not isinstance(h, RotatingFileHandler), f"Expected console handler, got {type(h)}"
+    elif handler_type == HandlerType.FILE:
+        assert handlers
+        for h in handlers:
+            assert isinstance(h, RotatingFileHandler), f"Expected file handler, got {type(h)}"
+    elif handler_type == HandlerType.ALL:
+        assert handlers
+        for h in handlers:
+            assert isinstance(h, logging.Handler)
+    else:
+        # Invalid types ("none", "unknown") must return an empty list
+        assert not handlers
 
 @pytest.mark.parametrize(
     "valid_level",
@@ -98,22 +140,6 @@ def test_resolve_level(valid_level: str | int) -> None:
     result = AppLogger._resolve_level(valid_level)
     assert isinstance(result, int)
     assert result in {logging.NOTSET, logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL}
-
-def test_set_level_invalid_inputs(temp_log_dir: Path) -> None:
-    """Test invalid level and invalid handler_type in single function."""
-    log_file = _setup(temp_log_dir, file_level="WARNING")
-
-    # Test invalid level
-    AppLogger.set_level("NONEXISTENT", handler_type="all")
-    assert logging.getLogger().level == logging.INFO
-
-    AppLogger.reset()
-    log_file = _setup(temp_log_dir, file_level="WARNING")
-
-    # Test invalid handler_type
-    AppLogger.set_level("DEBUG", handler_type="bad_type")
-    _flush()
-    assert "Invalid handler_type" in log_file.read_text()
 
 
 # ──────────── Get Logger ────────────
@@ -138,6 +164,56 @@ def test_logger_file_output(temp_log_dir: Path) -> None:
     _flush()
     assert "Hello Logger" in log_file.read_text()
 
+# ──────────── Change Format ────────────
+@pytest.mark.parametrize(
+    "handler_type, expected_message",
+    [
+        (HandlerType.CONSOLE, "Cannot change format of RichHandler"),
+        (HandlerType.FILE, "Cannot change format of JsonFormatter"),
+    ],
+)
+def test_set_format_skips_special_handlers(
+    temp_log_dir: Path,
+    handler_type,
+    expected_message: str,
+) -> None:
+    """set_format skips unsupported handlers and logs a warning."""
+    log_file = _setup(
+        temp_log_dir,
+        file_level="DEBUG",
+        json_logs=(handler_type is HandlerType.FILE),
+    )
+
+    handlers = AppLogger._find_handlers(handler_type)
+
+    if handler_type is HandlerType.CONSOLE:
+        handler = handlers[0]
+    else:
+        handler = next(
+            h for h in handlers if isinstance(h.formatter, JsonFormatter)
+        )
+
+    original_formatter = handler.formatter
+
+    AppLogger.set_format("%(levelname)s: %(message)s", handler_type)
+    _flush()
+
+    # Formatter must remain unchanged
+    assert handler.formatter is original_formatter
+
+    # Warning should be logged
+    assert expected_message in log_file.read_text()
+
+
+def test_set_format_file_handler_applies_format(temp_log_dir: Path) -> None:
+    """set_format correctly updates standard file handler format."""
+    log_file = _setup(temp_log_dir, file_level="DEBUG")
+
+    AppLogger.set_format("%(levelname)s: %(message)s", HandlerType.FILE)
+    AppLogger.get_logger("test").warning("Format test")
+    _flush()
+
+    assert "WARNING: Format test" in log_file.read_text()
 
 # ──────────── silence_noisy_libraries ────────────
 def test_silence_libraries(temp_log_dir: Path) -> None:
@@ -153,7 +229,7 @@ def test_silence_libraries(temp_log_dir: Path) -> None:
 
 # ──────────── Console & JSON fallback ────────────
 def test_console_fallback(temp_log_dir: Path) -> None:
-    with mock.patch("logguard.logger.RichHandler", side_effect=ImportError):
+    with mock.patch("logguard.logger.RICH_AVAILABLE", False):
         AppLogger.reset()
         _setup(temp_log_dir)
     console_handlers = [h for h in logging.getLogger().handlers if not isinstance(h, RotatingFileHandler)]
@@ -194,3 +270,13 @@ def test_json_library_missing() -> None:
         importlib.reload(lg_logger)
         assert lg_logger.JsonFormatter is None
         assert lg_logger.JSON_LOGGER_AVAILABLE is False
+
+
+def test_rich_library_missing() -> None:
+    with mock.patch.dict("sys.modules", {"rich.console": None, "rich.logging": None}):
+        import logguard.logger as lg_logger
+
+        importlib.reload(lg_logger)
+        assert lg_logger.Console is None
+        assert lg_logger.RichHandler is None
+        assert lg_logger.RICH_AVAILABLE is False

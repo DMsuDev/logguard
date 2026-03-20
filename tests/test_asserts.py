@@ -25,11 +25,12 @@ from logguard.asserts import (
     ASSERT_NOT_NULL,
     ASSERT_NULL,
     ASSERT_TYPE,
-    AssertionConfig,
-    AssertionManager,
     CHECK,
     ENSURE,
     VERIFY,
+    AssertionConfig,
+    AssertionManager,
+    AssertionMode,
 )
 from logguard.exceptions import (
     AssertFailure,
@@ -42,7 +43,7 @@ from logguard.exceptions import (
     TypeErrorAssert,
 )
 
-# ──────────── Core Assertions ────────────
+# ------------ Core Assertions ------------
 
 
 @pytest.mark.parametrize("assert_fn", [CHECK, ASSERT, ENSURE, VERIFY])
@@ -92,8 +93,7 @@ def test_assertion_behaviour(
         "dev-raise",
         "log_only",
         "",
-        None,
-        123,
+        "unknown",
     ],
 )
 def test_handle_unknown_modes(unknown_mode: Any) -> None:
@@ -111,7 +111,7 @@ def test_handle_unknown_modes(unknown_mode: Any) -> None:
     assert "Unknown assertion mode:" in str(exc_info.value)
 
 
-# ──────────── Specialized Assertions ────────────
+# ------------ Specialized Assertions ------------
 
 
 @pytest.mark.parametrize(
@@ -164,7 +164,7 @@ def test_specialized_assertions(
                 fn(value)
 
 
-# ──────────── Configuration & Custom Strategies ────────────
+# ------------ Configuration & Custom Strategies ------------
 
 
 def test_assertion_manager_config(dev_environment: None) -> None:
@@ -201,7 +201,7 @@ def test_custom_failure_strategy(
     assert calls[0][0] == "Custom log"
 
 
-# ──────────── Edge Cases ────────────
+# ------------ Edge Cases ------------
 
 
 def test_assertion_empty_message_and_context(dev_environment: None) -> None:
@@ -221,3 +221,48 @@ def test_assertion_manager_is_production_flag() -> None:
     assert AssertionManager._is_prod() is True
     AssertionManager.configure(AssertionConfig(environment="development"))
     assert AssertionManager._is_prod() is False
+
+
+# ------------ AssertionMode Enum ------------
+
+@pytest.mark.parametrize(
+    "mode, expected",
+    [
+        ("RAISE", "raise"),
+        ("DEBUG_ONLY", "debug_only"),
+        ("DEV_RAISE", "dev_raise"),
+    ],
+)
+def test_assertion_mode_values(mode: str, expected: str) -> None:
+    """AssertionMode enum exposes correct string values."""
+    assert getattr(AssertionMode, mode).value == expected
+
+
+@pytest.mark.parametrize("mode", [AssertionMode.RAISE, "raise"])
+def test_handle_accepts_enum_and_string(mode, dev_environment: None) -> None:
+    """_handle accepts both enum and legacy string modes."""
+    with pytest.raises(AssertFailure):
+        AssertionManager._handle(
+            condition=False,
+            message="test",
+            context={},
+            mode=mode,
+            exception_class=AssertFailure,
+        )
+
+
+def test_staging_environment_acts_like_production() -> None:
+    """Staging behaves like production (no assertions raised)."""
+    AssertionManager.configure(AssertionConfig(environment="staging"))
+
+    assert AssertionManager._is_prod()
+    assert not AssertionManager._is_dev()
+
+    # Should not raise
+    ASSERT(False, "Should not raise in staging")
+
+
+def test_config_environment_constants() -> None:
+    """Environment constants include expected values."""
+    assert {"development"} <= set(AssertionConfig.DEV_ENVIRONMENTS)
+    assert {"production", "staging"} <= set(AssertionConfig.PROD_ENVIRONMENTS)

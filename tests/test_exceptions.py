@@ -14,8 +14,8 @@ from logguard.exceptions import (
     AssertFailure,
     ComparisonError,
     ConfigurationError,
-    EqualsError,
     EmptyError,
+    EqualsError,
     ForbiddenError,
     LogGuardError,
     MembershipError,
@@ -60,7 +60,7 @@ def test_default_context_is_empty() -> None:
     assert exc.context == {}
 
 
-# ──────────── Inheritance ────────────
+# ------------ Inheritance ------------
 
 
 @pytest.mark.parametrize(
@@ -105,7 +105,7 @@ def test_catch_all_specialized_exceptions() -> None:
             raise exc_class("Test")
 
 
-# ──────────── Context Storage ────────────
+# ------------ Context Storage ------------
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_context_accessible_after_catch() -> None:
         assert e.context["code"] == 500
 
 
-# ──────────── Factory Method from_dict ────────────
+# ------------ Factory Method from_dict ------------
 
 
 @pytest.mark.parametrize("exc_class", [LogGuardError, ValidationError, AssertFailure, NullError, RangeError])
@@ -146,7 +146,7 @@ def test_from_dict_handles_missing_context() -> None:
     assert exc.context == {}
 
 
-# ──────────── Messages ────────────
+# ------------ Messages ------------
 
 
 @pytest.mark.parametrize("msg", ["", "Simple", "Unicode: café ñ 日本語", "Special <>&\"'", "Multi\nline\nmessage"])
@@ -158,10 +158,26 @@ def test_exception_messages(msg: str) -> None:
 def test_repr_includes_class_name() -> None:
     exc = NullError("Test")
     repr_str = repr(exc)
-    assert "NullError" in repr_str or "Test" in repr_str
+    assert "NullError" in repr_str
+    assert "Test" in repr_str
 
 
-# ──────────── to_dict with __cause__ ────────────
+def test_repr_with_context() -> None:
+    """__repr__ includes context when present."""
+    exc = LogGuardError("fail", context={"key": 42})
+    r = repr(exc)
+    assert "LogGuardError" in r
+    assert "fail" in r
+    assert "key" in r
+
+
+def test_repr_without_context() -> None:
+    """__repr__ is clean without context."""
+    exc = LogGuardError("simple")
+    assert repr(exc) == "LogGuardError('simple')"
+
+
+# ------------ to_dict with __cause__ ------------
 
 
 def test_to_dict_includes_cause_when_chained() -> None:
@@ -195,7 +211,7 @@ def test_to_dict_cause_with_custom_exception() -> None:
         assert data["type"] == "AssertFailure"
 
 
-# ──────────── __str__ with context ────────────
+# ------------ __str__ with context ------------
 
 
 def test_str_with_context_formats_correctly() -> None:
@@ -208,7 +224,7 @@ def test_str_with_context_formats_correctly() -> None:
     assert "b='x'" in result
 
 
-# ──────────── from_dict default message ────────────
+# ------------ from_dict default message ------------
 
 
 def test_from_dict_default_message_when_missing() -> None:
@@ -218,7 +234,7 @@ def test_from_dict_default_message_when_missing() -> None:
     assert exc.context == {}
 
 
-# ──────────── Specialized Exceptions ────────────
+# ------------ Specialized Exceptions ------------
 
 
 def test_missing_config_error_stores_key_and_source() -> None:
