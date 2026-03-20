@@ -36,8 +36,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
-
       - uses: actions/setup-python@v5
+
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: "pip"
@@ -107,4 +107,15 @@ jobs:
           pip install -e ".[dev]"
 
       - name: Run tests
-        run: pytest
+        run: pytest tests/ -v --cov=logguard --cov-report=term-missing --cov-report=xml:coverage.xml --cov-branch
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: coverage.xml
+          name: py-logguard
+          flags: unittests
+          env_vars: OS,PYTHON
+          verbose: true
+          fail_ci_if_error: false
