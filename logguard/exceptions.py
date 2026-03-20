@@ -4,34 +4,41 @@ Custom exceptions for LogGuard assertions and logging.
 Provides a semantic exception hierarchy for structured error handling.
 All exceptions include rich context accessible via `to_dict()`.
 
-Hierarchy:
+Hierarchy::
 
-LogGuardError
-├── ConfigurationError
-│   └── MissingConfigError
-├── ValidationError
-│   └── AssertFailure
-│       ├── NullError
-│       ├── RangeError
-│       ├── TypeErrorAssert
-│       ├── EmptyError
-│       ├── EqualsError
-│       ├── ComparisonError
-│       └── MembershipError
-└── ResourceError
-    ├── ResourceNotFoundError
-    └── ForbiddenError
+    LogGuardError
+    +-- ConfigurationError
+    |   +-- MissingConfigError
+    +-- ValidationError
+    |   +-- AssertFailure
+    |       +-- NullError
+    |       +-- RangeError
+    |       +-- TypeErrorAssert
+    |       +-- EmptyError
+    |       +-- EqualsError
+    |       +-- ComparisonError
+    |       +-- MembershipError
+    +-- ResourceError
+        +-- ResourceNotFoundError
+        +-- ForbiddenError
 
-Example:
-    >>> from logguard.exceptions import ValidationError
-    >>> raise ValidationError("Invalid email", field="email")
+Example::
+
+    from logguard.exceptions import ValidationError
+    raise ValidationError("Invalid email", field="email")
 """
+
+from __future__ import annotations
 
 from typing import Any
 
 
 class LogGuardError(Exception):
-    """Base class for all LogGuard exceptions."""
+    """Base class for all LogGuard exceptions.
+
+    Every exception carries a human-readable *message* and an optional
+    *context* dictionary that holds structured debugging information.
+    """
 
     def __init__(self, message: str = "LogGuard error", context: dict[str, Any] | None = None) -> None:
         super().__init__(message)
@@ -44,6 +51,12 @@ class LogGuardError(Exception):
         ctx = ", ".join(f"{k}={v!r}" for k, v in self.context.items())
         return f"{self.message} | context: {ctx}"
 
+    def __repr__(self) -> str:
+        cls = self.__class__.__name__
+        if self.context:
+            return f"{cls}({self.message!r}, context={self.context!r})"
+        return f"{cls}({self.message!r})"
+
     def to_dict(self) -> dict[str, Any]:
         """Convert the exception to a dictionary for structured logging or serialization."""
         data = {"type": self.__class__.__name__, "message": self.message, "context": self.context.copy()}
@@ -52,14 +65,14 @@ class LogGuardError(Exception):
         return data
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "LogGuardError":
+    def from_dict(cls, data: dict[str, Any]) -> LogGuardError:
         """Create an exception instance from a dictionary."""
         return cls(message=data.get("message", "LogGuard error recovered"), context=data.get("context", {}))
 
 
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 # Configuration errors
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 
 
 class ConfigurationError(LogGuardError):
@@ -73,9 +86,9 @@ class MissingConfigError(ConfigurationError):
         super().__init__(f"Missing configuration key: {key!r}", context={"key": key, "source": source})
 
 
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 # Validation / assertion errors
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 
 
 class ValidationError(LogGuardError):
@@ -114,9 +127,9 @@ class MembershipError(AssertFailure):
     """Raised when a value is not found in a container."""
 
 
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 # Resource errors
-# ──────────────────────────────────────────────
+# ----------------------------------------------
 
 
 class ResourceError(LogGuardError):

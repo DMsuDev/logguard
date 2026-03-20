@@ -1,10 +1,10 @@
 """Logging utilities and a convenience logger configuration helper.
 
-This module provides ``AppLogger``, a simple helper to configure the Python
-logging subsystem with sensible defaults (file rotation, console handler with
-rich formatting, and optional JSON output).
+This module provides :class:`AppLogger`, a simple helper to configure the
+Python logging subsystem with sensible defaults (file rotation, console
+handler with rich formatting, and optional JSON output).
 
-Usage example:
+Usage example::
 
     from logguard.logger import AppLogger
 
@@ -16,12 +16,23 @@ The helper is intended for applications and simple libraries that want a
 centralized logging configuration without repeating boilerplate.
 """
 
+from __future__ import annotations
+
+import inspect
 import logging
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from rich.console import Console
-from rich.logging import RichHandler
+try:
+    from rich.console import Console
+    from rich.logging import RichHandler
+
+    RICH_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    Console = None  # type: ignore[assignment,misc]
+    RichHandler = None  # type: ignore[assignment,misc]
+    RICH_AVAILABLE = False
 
 try:
     from pythonjsonlogger.json import JsonFormatter
@@ -30,6 +41,9 @@ try:
 except ImportError:
     JsonFormatter = None  # type: ignore[assignment,misc]
     JSON_LOGGER_AVAILABLE = False
+
+if TYPE_CHECKING:
+    pass
 
 
 class AppLogger:
@@ -58,6 +72,10 @@ class AppLogger:
     DEFAULT_LOG_FILE: str = "app.log"
     DEFAULT_MAX_BYTES: int = 5_000_000
     DEFAULT_BACKUP_COUNT: int = 3
+
+    _VALID_LOG_LEVELS: frozenset[int] = frozenset(
+        {logging.NOTSET, logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL}
+    )
 
     _configured: bool = False
 
@@ -94,9 +112,9 @@ class AppLogger:
             )
             return
 
-        log_file = log_file or cls.DEFAULT_LOG_FILE
-        max_bytes = max_bytes or cls.DEFAULT_MAX_BYTES
-        backup_count = backup_count or cls.DEFAULT_BACKUP_COUNT
+        log_file = log_file if log_file is not None else cls.DEFAULT_LOG_FILE
+        max_bytes = max_bytes if max_bytes is not None else cls.DEFAULT_MAX_BYTES
+        backup_count = backup_count if backup_count is not None else cls.DEFAULT_BACKUP_COUNT
 
         console_level = cls._resolve_level(console_level)
         file_level = cls._resolve_level(file_level)
@@ -133,26 +151,30 @@ class AppLogger:
         logging.captureWarnings(True)  # Capture Python warnings as logs
         cls._configured = True
 
-    @staticmethod
-    def _resolve_level(value: str | int) -> int:
+    @classmethod
+    def _resolve_level(cls, value: str | int) -> int:
         """Convert log level string or int to int, validating it's a recognized level.
 
-        Falls back to DEBUG if the level is invalid.
-        Valid levels: 0 (NOTSET), 10 (DEBUG), 20 (INFO), 30 (WARNING), 40 (ERROR), 50 (CRITICAL).
-        """
-        valid_levels = {logging.NOTSET, logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL}
+        Falls back to ``DEBUG`` if the level is invalid.
 
+        Valid levels: 0 (NOTSET), 10 (DEBUG), 20 (INFO), 30 (WARNING),
+        40 (ERROR), 50 (CRITICAL).
+        """
         default_level: int = logging.DEBUG
 
         if isinstance(value, int):
-            if value in valid_levels:
+            if value in cls._VALID_LOG_LEVELS:
                 return value
-            logging.warning("Invalid log level %r. Must be one of %s. Falling back to DEBUG", value, valid_levels)
+            logging.warning(
+                "Invalid log level %r. Must be one of %s. Falling back to DEBUG",
+                value,
+                cls._VALID_LOG_LEVELS,
+            )
             return default_level
 
         if isinstance(value, str):
             resolved = getattr(logging, value.upper(), None)
-            if isinstance(resolved, int) and resolved in valid_levels:
+            if isinstance(resolved, int) and resolved in cls._VALID_LOG_LEVELS:
                 return resolved
             logging.warning("Invalid log level %r. Falling back to DEBUG", value)
             return default_level
@@ -208,16 +230,18 @@ class AppLogger:
         cls,
         level: int,
     ) -> logging.Handler:
-        """
-        Helper to create a console handler with rich formatting.
-        If Rich is not available, falls back to a standard StreamHandler with a simple format.
+        """Create a console handler with rich formatting.
+
+        Falls back to a standard :class:`logging.StreamHandler` with a simple
+        format when the ``rich`` library is not installed.
 
         Args:
             level: Log level for the console handler.
+
         Returns:
             Configured logging.Handler instance.
         """
-        try:
+        if RICH_AVAILABLE and RichHandler is not None and Console is not None:
             return RichHandler(
                 level=level,
                 console=Console(force_terminal=True, soft_wrap=True),
@@ -230,16 +254,16 @@ class AppLogger:
                 tracebacks_show_locals=True,  # Show local variables in tracebacks
                 markup=False,  # Disable markup parsing in messages
             )
-        except ImportError:
-            handler = logging.StreamHandler()
-            handler.setLevel(level)
-            handler.setFormatter(
-                logging.Formatter(
-                    "%(asctime)s · %(levelname)-7s · %(name)-18s · %(message)s",
-                    datefmt="%H:%M:%S",
-                )
+
+        handler = logging.StreamHandler()
+        handler.setLevel(level)
+        handler.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)-7s - %(name)-18s - %(message)s",
+                datefmt="%H:%M:%S",
             )
-            return handler
+        )
+        return handler
 
     @classmethod
     def _create_json_handler(
@@ -326,8 +350,6 @@ class AppLogger:
         """
         if name is None and auto_name:
             try:
-                import inspect
-
                 frame = inspect.currentframe()
                 if frame and frame.f_back:
                     module = inspect.getmodule(frame.f_back)
@@ -351,13 +373,7 @@ class AppLogger:
             handler_type: Which handlers to update ('all', 'console', 'file').
             logger_name: Specific logger name, or None for root logger.
         """
-        if isinstance(level, str):
-            resolved = getattr(logging, level.upper(), None)
-            if resolved is None or not isinstance(resolved, int):
-                logging.warning("Invalid log level %r. Falling back to INFO", level)
-                level = logging.INFO
-            else:
-                level = resolved
+        level = cls._resolve_level(level)
 
         target_logger = logging.getLogger(logger_name) if logger_name else logging.getLogger()
 
@@ -367,10 +383,11 @@ class AppLogger:
                 handler.setLevel(level)
 
         elif handler_type == "console":
+            console_handler_types = (
+                (logging.StreamHandler,) if RichHandler is None else (logging.StreamHandler, RichHandler)
+            )
             for handler in target_logger.handlers:
-                if isinstance(handler, (logging.StreamHandler, RichHandler)) and not isinstance(
-                    handler, RotatingFileHandler
-                ):
+                if isinstance(handler, console_handler_types) and not isinstance(handler, RotatingFileHandler):
                     handler.setLevel(level)
 
         elif handler_type == "file":
