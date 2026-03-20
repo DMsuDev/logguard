@@ -1,11 +1,8 @@
 # Logguard
 
-[![Python](https://img.shields.io/badge/Language-Python-3776AB?style=flat&logo=python&logoColor=white)](https://www.python.org/)
 [![Supported Python Versions](https://img.shields.io/pypi/pyversions/py-logguard)](https://pypi.org/project/py-logguard/)
 [![PyPI](https://img.shields.io/pypi/v/py-logguard?style=flat&logo=pypi&logoColor=white)](https://pypi.org/project/py-logguard/)
-
-![Status](https://img.shields.io/badge/status-beta-yellow?style=flat)
-[![license](https://img.shields.io/badge/license-MIT-blue?logo=opensourceinitiative&logoColor=white)](https://raw.githubusercontent.com/DMsuDev/logguard/main/LICENSE.rst)
+[![codecov](https://img.shields.io/codecov/c/github/DMsuDev/logguard?style=flat&logo=codecov&logoColor=white)](https://codecov.io/gh/DMsuDev/logguard)
 
 Logguard is a lightweight logging and assertion library designed to make it easy to capture rich context and structured logs in Python applications. It provides a simple API for logging with automatic source capture, flexible configuration, and a semantic exception hierarchy.
 
@@ -290,12 +287,34 @@ AppLogger.setup(
 )
 ```
 
+**`HandlerType` enum**: use instead of plain strings to select which handlers an operation targets:
+
+| Member                | Targets                       |
+| --------------------- | ----------------------------- |
+| `HandlerType.ALL`     | Every handler (default)       |
+| `HandlerType.CONSOLE` | Console / RichHandler only    |
+| `HandlerType.FILE`    | RotatingFileHandler only      |
+| `HandlerType.JSON`    | JSON RotatingFileHandler only |
+
 **Methods:**
 
-- `get_logger(name: str | None = None)` - Get or create a logger instance
-- `set_level(level: str, handler_type: str = "all")` - Change log level dynamically
-- `silence_noisy_libraries(modules: list[str] | None = None)` - Suppress third-party logs
-- `reset()` - Reset configuration (useful for testing)
+- `get_logger(name: str | None = None)`: Get or create a logger instance
+- `set_level(level, handler_type: HandlerType | str = HandlerType.ALL)`: Change log level on selected handlers at runtime
+- `set_format(format_string, handler_type: HandlerType | str = HandlerType.ALL, datefmt=None)`: Change the format string on selected handlers; RichHandler and JsonFormatter instances are skipped automatically
+- `silence_noisy_libraries(modules: list[str] | None = None)`: Suppress third-party logs
+- `reset()`: Reset configuration (useful for testing)
+
+```python
+from logguard import AppLogger, HandlerType
+
+AppLogger.setup(log_file="logs/app.log", console_level="INFO")
+
+# Drop file handler to DEBUG without touching the console
+AppLogger.set_level("DEBUG", HandlerType.FILE)
+
+# Apply a compact format to file logs only
+AppLogger.set_format("%(asctime)s | %(levelname)s | %(message)s", HandlerType.FILE)
+```
 
 </details>
 
