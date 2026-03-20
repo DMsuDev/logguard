@@ -20,6 +20,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: System :: Logging",
 ]
@@ -66,15 +67,16 @@ src = ["logguard", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "ANN", "C4", "RET", "PL", "RUF"]
-ignore = ["ANN101", "ANN102", "ANN401"]  # self/cls type hints and Any are optional
+ignore = ["ANN101", "ANN102", "ANN401"]  # Any type hints are acceptable
 fixable = ["ALL"]
 unfixable = []
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
-"asserts.py" = ["PLR0913", "PLR0912", "PLW0603", "RUF022"]
+"asserts.py" = ["PLR0913", "PLR0912", "PLW0603", "RUF022", "SIM102"]
 "logger.py" = ["PLR0913", "PLR0915", "PLC0415"]
 "examples/*.py" = ["PLR2004", "PLR0915", "E501", "PLC0415"]
+"tests/*.py" = ["PLR0913", "PLR2004", "PLC0415", "ANN"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["logguard"]
@@ -99,14 +101,19 @@ module = "tests.*"
 ignore_errors = true
 
 # =================================================================
-# Pytest Configuration - Testing Framework
+# Pytest Configuration
 # =================================================================
 
 [tool.pytest.ini_options]
 minversion = "8.0"
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-ra --strict-markers --cov=logguard --cov-report=term-missing --cov-report=html"
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--cov=logguard",
+    "--cov-report=term-missing",
+]
 markers = [
     "slow: marks tests as slow",
     "integration: marks tests as integration tests",
