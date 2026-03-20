@@ -1,6 +1,6 @@
 [project]
 name = "py-logguard"
-version = "0.3.0"
+version = "0.3.1"
 description = "Utilities for logging, assertions and custom exceptions"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -35,7 +35,7 @@ json = [
 ]
 dev = [
     "pytest>=8.0",
-    "pytest-cov>=5.0",
+    "pytest-cov>=6.0",
     "ruff>=0.6",
     "mypy>=1.11",
     "pre-commit>=4.0",

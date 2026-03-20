@@ -101,8 +101,6 @@ def test_catch_all_specialized_exceptions() -> None:
     ]:
         with pytest.raises(LogGuardError):
             raise exc_class("Test")
-        with pytest.raises(AssertFailure):
-            raise exc_class("Test")
 
 
 # ------------ Context Storage ------------

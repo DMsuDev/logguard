@@ -2,15 +2,23 @@
 
 This module provides :class:`AppLogger`, a simple helper to configure the
 Python logging subsystem with sensible defaults (file rotation, console
-handler with rich formatting, and optional JSON output).
+handler with rich formatting, and optional JSON output), plus the
+:class:`HandlerType` enum to select which handlers an operation targets
+without magic strings.
 
 Usage example::
 
-    from logguard.logger import AppLogger
+    from logguard.logger import AppLogger, HandlerType
 
     AppLogger.setup(log_file="logs/app.log", console_level="INFO")
     logger = AppLogger.get_logger(__name__)
     logger.info("Hello world")
+
+    # Change level only on the file handler
+    AppLogger.set_level("DEBUG", HandlerType.FILE)
+
+    # Change format only on the file handler
+    AppLogger.set_format("%(levelname)s: %(message)s", HandlerType.FILE)
 
 The helper is intended for applications and simple libraries that want a
 centralized logging configuration without repeating boilerplate.
@@ -71,7 +79,9 @@ class AppLogger:
     """
     Standalone logging configuration.
 
-    Usage:
+    Usage::
+
+        from logguard.logger import AppLogger, HandlerType
 
         AppLogger.setup(
             log_file="logs/app.log",
@@ -82,12 +92,26 @@ class AppLogger:
         logger = AppLogger.get_logger(__name__)
         logger.info("This is an info message")
 
+        # Target specific handler types with the HandlerType enum
+        AppLogger.set_level("WARNING", HandlerType.CONSOLE)
+        AppLogger.set_format("%(levelname)s | %(message)s", HandlerType.FILE)
+
+    **Public methods:**
+
+    - :meth:`setup`: configure the root logger (runs once per process).
+    - :meth:`get_logger`: return a named logger, auto-detecting the caller's module.
+    - :meth:`set_level`: change log level on selected handlers at runtime.
+    - :meth:`set_format`: change the format string on selected handlers at runtime.
+      RichHandler and JsonFormatter instances are automatically skipped.
+    - :meth:`silence_noisy_libraries`: suppress chatty third-party loggers.
+    - :meth:`reset`: clear all handlers and allow :meth:`setup` to run again.
+
     Note:
-        - get_logger() can be called at any time (before or after setup).
-          Loggers created before setup() will start working once setup()
-          configures the root logger, thanks to Python's log propagation.
-        - setup() only runs once per process. Subsequent calls are ignored
-          with a warning. Use reset() + setup() to reconfigure.
+        - :meth:`get_logger` can be called at any time (before or after setup).
+          Loggers created before :meth:`setup` will start working once setup()
+          configures the root logger, thanks to Python's built-in log propagation.
+        - :meth:`setup` only runs once per process. Subsequent calls are ignored
+          with a warning. Use :meth:`reset` + :meth:`setup` to reconfigure.
     """
 
     DEFAULT_LOG_FILE: str = "app.log"
