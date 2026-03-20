@@ -67,16 +67,16 @@ def section(number: int, title: str, icon: str = "📦") -> None:
 
 def success(message: str) -> None:
     """Print a success message."""
-    console.print(f"  [green]✓[/] {message}")
+    console.print(f"  [green][+][/] {message}")
 
 
 def failure(message: str, detail: str = "") -> None:
     """Print a failure message."""
     if detail:
-        console.print(f"  [red]✗[/] {message}")
-        console.print(f"    [dim]└─ {detail}[/]")
+        console.print(f"  [red][x][/] {message}")
+        console.print(rf"    [dim]\- {detail}[/]")
     else:
-        console.print(f"  [red]✗[/] {message}")
+        console.print(f"  [red][x][/] {message}")
 
 
 def info(message: str) -> None:
@@ -86,7 +86,7 @@ def info(message: str) -> None:
 
 def warn(message: str) -> None:
     """Print a warning message."""
-    console.print(f"  [yellow]⚠[/] {message}")
+    console.print(f"  [yellow][!][/] {message}")
 
 
 def code(text: str) -> str:
@@ -94,14 +94,14 @@ def code(text: str) -> str:
     return f"[cyan]{text}[/]"
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 1. LOGGING DEMO
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_logging() -> None:
     """Demonstrate AppLogger functionality."""
-    section(1, "LOGGING DEMO", "📝")
+    section(1, "LOGGING DEMO", "[#]")
 
     # Setup logging (only needs to be done once)
     AppLogger.setup(
@@ -141,9 +141,9 @@ def demo_logging() -> None:
     info("Console level restored to DEBUG")
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 2. CORE ASSERTIONS DEMO
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_core_assertions() -> None:
@@ -222,9 +222,9 @@ def demo_core_assertions() -> None:
         failure(f"{code('VERIFY(discount < price)')}", e.message)
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 3. ENVIRONMENT SWITCHING DEMO
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_environment_switching() -> None:
@@ -263,9 +263,9 @@ def demo_environment_switching() -> None:
     info("Reset to development mode")
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 4. SPECIALIZED ASSERTIONS DEMO
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_specialized_assertions() -> None:
@@ -285,7 +285,7 @@ def demo_specialized_assertions() -> None:
     table.add_row("ASSERT_EQUALS", "EqualsError", "a == b")
     table.add_row("ASSERT_GREATER", "ComparisonError", "a > b")
     table.add_row("ASSERT_LESS", "ComparisonError", "a < b")
-    table.add_row("ASSERT_IN_RANGE", "RangeError", "min ≤ x ≤ max")
+    table.add_row("ASSERT_IN_RANGE", "RangeError", "min <= x <= max")
     table.add_row("ASSERT_BETWEEN_EXCLUSIVE", "RangeError", "min < x < max")
     table.add_row("ASSERT_TYPE", "TypeErrorAssert", "isinstance(x, type)")
     table.add_row("ASSERT_NOT_EMPTY", "EmptyError", "len(x) > 0")
@@ -383,14 +383,14 @@ def demo_specialized_assertions() -> None:
         failure(f"{code(assert_in_call)} -> [yellow]MembershipError[/]", e.message)
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 5. EXCEPTION HANDLING DEMO
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_exceptions() -> None:
     """Demonstrate the exception hierarchy and serialization."""
-    section(5, "EXCEPTION HIERARCHY DEMO", "🏗️")
+    section(5, "EXCEPTION HIERARCHY DEMO", "[#]")
 
     # Show exception hierarchy as tree
     tree = Tree("[bold]LogGuardError[/] [dim](base)[/]")
@@ -455,12 +455,12 @@ def demo_exceptions() -> None:
     ]
     for err in errors:
         if isinstance(err, LogGuardError):
-            console.print(f"    [green]✓[/] Caught [cyan]{type(err).__name__}[/]: {err.message}")
+            console.print(f"    [green][+][/] Caught [cyan]{type(err).__name__}[/]: {err.message}")
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 6. CUSTOM FAILURE STRATEGY DEMO
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_custom_strategy() -> None:
@@ -499,9 +499,9 @@ def demo_custom_strategy() -> None:
     info("Reset to default strategy")
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # 7. REAL-WORLD USAGE EXAMPLE
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def demo_real_world() -> None:
@@ -580,9 +580,9 @@ def demo_real_world() -> None:
         failure("Creation failed [dim](age=200 out of range 0-150)[/]")
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 # MAIN
-# ════════════════════════════════════════════════════════════════════════
+# ========================================================================
 
 
 def main() -> None:
@@ -608,7 +608,7 @@ def main() -> None:
     console.print()
     console.print(
         Panel(
-            "[bold green]✓ All features demonstrated successfully![/]\n"
+            "[bold green]All features demonstrated successfully![/]\n"
             "[dim]Check [cyan]logs/demo.log[/cyan] for file output[/]",
             title="[bold green]✅ DEMO COMPLETE[/]",
             border_style="green",
