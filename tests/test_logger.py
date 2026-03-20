@@ -55,14 +55,14 @@ def test_setup_defaults_no_args() -> None:
 @pytest.mark.parametrize(
     "level_input, handler_type_input, expected_console, expected_file, expected_root, expected_log_fragment",
     [
+        pytest.param("DEBUG", HandlerType.CONSOLE, logging.DEBUG, None, None, None, id="valid-console"),
+        pytest.param("ERROR", HandlerType.FILE, None, logging.ERROR, None, None, id="valid-file"),
         pytest.param(
-            "DEBUG", HandlerType.CONSOLE, logging.DEBUG, None, None, None, id="valid-console"),
+            "WARNING", HandlerType.ALL, logging.WARNING, logging.WARNING, logging.WARNING, None, id="valid-all"
+        ),
         pytest.param(
-            "ERROR", HandlerType.FILE, None, logging.ERROR, None, None, id="valid-file"),
-        pytest.param(
-            "WARNING", HandlerType.ALL, logging.WARNING, logging.WARNING, logging.WARNING, None, id="valid-all"),
-        pytest.param(
-            "NONEXISTENT", HandlerType.ALL, logging.DEBUG, logging.DEBUG, logging.DEBUG, None, id="invalid-level"),
+            "NONEXISTENT", HandlerType.ALL, logging.DEBUG, logging.DEBUG, logging.DEBUG, None, id="invalid-level"
+        ),
         pytest.param("DEBUG", "bad_type", None, None, None, "Invalid handler_type", id="invalid-handler-type"),
     ],
 )
@@ -92,10 +92,12 @@ def test_set_level(
         _flush()
         assert expected_log_fragment in log_file.read_text()
 
+
 @pytest.mark.parametrize("level_input", ["INVALID", 12345, [], {}])
 def test_resolve_level_invalid(level_input: Any) -> None:
     """_resolve_level returns DEBUG for invalid inputs."""
     assert AppLogger._resolve_level(level_input) == logging.DEBUG
+
 
 @pytest.mark.parametrize(
     "handler_type",
@@ -127,13 +129,30 @@ def test_find_handlers_types(temp_log_dir: Path, handler_type: HandlerType | str
         # Invalid types ("none", "unknown") must return an empty list
         assert not handlers
 
+
 @pytest.mark.parametrize(
     "valid_level",
     [
-        logging.DEBUG, logging.INFO, logging.WARNING, logging.ERROR, logging.CRITICAL,
-        [], {}, "NOTSET", 0, 10, 20, 30, 40, 50, "ERROR", "CRITICAL",
-        "DEBUG", "INFO", "WARNING"
-    ]
+        logging.DEBUG,
+        logging.INFO,
+        logging.WARNING,
+        logging.ERROR,
+        logging.CRITICAL,
+        [],
+        {},
+        "NOTSET",
+        0,
+        10,
+        20,
+        30,
+        40,
+        50,
+        "ERROR",
+        "CRITICAL",
+        "DEBUG",
+        "INFO",
+        "WARNING",
+    ],
 )
 def test_resolve_level(valid_level: str | int) -> None:
     """_resolve_level handles valid levels correctly."""
@@ -164,6 +183,7 @@ def test_logger_file_output(temp_log_dir: Path) -> None:
     _flush()
     assert "Hello Logger" in log_file.read_text()
 
+
 # ──────────── Change Format ────────────
 @pytest.mark.parametrize(
     "handler_type, expected_message",
@@ -189,9 +209,7 @@ def test_set_format_skips_special_handlers(
     if handler_type is HandlerType.CONSOLE:
         handler = handlers[0]
     else:
-        handler = next(
-            h for h in handlers if isinstance(h.formatter, JsonFormatter)
-        )
+        handler = next(h for h in handlers if isinstance(h.formatter, JsonFormatter))
 
     original_formatter = handler.formatter
 
@@ -214,6 +232,7 @@ def test_set_format_file_handler_applies_format(temp_log_dir: Path) -> None:
     _flush()
 
     assert "WARNING: Format test" in log_file.read_text()
+
 
 # ──────────── silence_noisy_libraries ────────────
 def test_silence_libraries(temp_log_dir: Path) -> None:

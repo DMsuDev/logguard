@@ -67,7 +67,7 @@ src = ["logguard", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "ANN", "C4", "RET", "PL", "RUF"]
-ignore = ["ANN101", "ANN102", "ANN401"]  # Any type hints are acceptable
+ignore = ["ANN401"]  # Any type hints are acceptable
 fixable = ["ALL"]
 unfixable = []
 

@@ -225,6 +225,7 @@ def test_assertion_manager_is_production_flag() -> None:
 
 # ------------ AssertionMode Enum ------------
 
+
 @pytest.mark.parametrize(
     "mode, expected",
     [
