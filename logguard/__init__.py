@@ -30,7 +30,7 @@ Example usage:
     x = -5
     ASSERT(x > 0, "Value must be positive", value=x)
 
-Version: 0.3.1
+Version: 0.3.2
 """
 
 from __future__ import annotations
@@ -94,7 +94,7 @@ if TYPE_CHECKING:
     from .exceptions import ResourceError as ResourceError
     from .exceptions import ResourceNotFoundError as ResourceNotFoundError
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 __all__ = [  # noqa: RUF022
     # Version
