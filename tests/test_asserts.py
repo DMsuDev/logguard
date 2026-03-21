@@ -242,14 +242,14 @@ def test_assertion_mode_values(mode: str, expected: str) -> None:
 @pytest.mark.parametrize("mode", [AssertionMode.RAISE, "raise"])
 def test_handle_accepts_enum_and_string(mode, dev_environment: None) -> None:
     """_handle accepts both enum and legacy string modes."""
-    with pytest.raises(AssertFailure):
-        AssertionManager._handle(
-            condition=False,
-            message="test",
-            context={},
-            mode=mode,
-            exception_class=AssertFailure,
-        )
+    exc = AssertionManager._handle(
+        condition=False,
+        message="test",
+        context={},
+        mode=mode,
+        exception_class=AssertFailure,
+    )
+    assert isinstance(exc, AssertFailure)
 
 
 def test_staging_environment_acts_like_production() -> None:
