@@ -276,8 +276,12 @@ class AssertionManager:
         context: dict[str, Any],
         mode: AssertionMode | str,
         exception_class: type[AssertFailure] = AssertFailure,
-    ) -> None:
+    ) -> AssertFailure | None:
         """Internal handler for assertion evaluation.
+
+        Returns the exception to raise (or ``None``).  The caller is
+        responsible for raising, this keeps internal frames out of the
+        user-visible traceback.
 
         Args:
             condition: The condition to evaluate. If ``True``, assertion passes.
@@ -286,12 +290,15 @@ class AssertionManager:
             mode: Assertion mode (:class:`AssertionMode` or legacy string).
             exception_class: Exception class to raise on failure.
 
+        Returns:
+            An exception instance when the assertion failed and should be
+            raised by the caller, or ``None`` otherwise.
+
         Raises:
-            AssertFailure: Or subclass if condition is ``False`` and mode requires raising.
             ValueError: If an unknown mode is specified.
         """
         if condition:
-            return
+            return None
 
         # Accept both enum values and legacy strings
         try:
@@ -300,16 +307,38 @@ class AssertionManager:
             raise ValueError(f"Unknown assertion mode: {mode}") from None
 
         if mode is AssertionMode.RAISE:
-            cls._raise_strategy(message, context, exception_class)
+            return cls._build_failure(message, context, exception_class)
 
-        elif mode is AssertionMode.DEV_RAISE:
+        if mode is AssertionMode.DEV_RAISE:
             if cls._is_dev():
-                cls._raise_strategy(message, context, exception_class)
-            else:
-                cls._log_strategy(message, context, exception_class)
+                return cls._build_failure(message, context, exception_class)
+            cls._log_strategy(message, context, exception_class)
 
         elif mode is AssertionMode.DEBUG_ONLY and cls._is_dev() and cls._config.enable_asserts:
+            return cls._build_failure(message, context, exception_class)
+
+        return None
+
+    @classmethod
+    def _build_failure(
+        cls,
+        message: str,
+        context: dict[str, Any],
+        exception_class: type[AssertFailure],
+    ) -> AssertFailure:
+        """Build the failure exception via the configured raise strategy.
+
+        Delegates to ``_raise_strategy`` (which may be user-supplied) and
+        captures the resulting exception so that it can be re-raised by the
+        public assertion function with a clean traceback.
+        """
+        try:
             cls._raise_strategy(message, context, exception_class)
+        except exception_class as exc:
+            exc.__traceback__ = None
+            return exc
+        # Fallback: strategy did not raise (custom strategy that just logs, etc.)
+        return exception_class(message, context=context)
 
 
 # ========================================================================
@@ -336,13 +365,15 @@ def CHECK(condition: bool, message: str = "", **context: Any) -> None:
         >>> CHECK(config is not None, "Configuration required", component="auth")
         >>> CHECK(len(items) > 0, "Items list cannot be empty", items=items)
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=condition,
         message=message or "CHECK failed",
         context=context,
         mode=AssertionMode.RAISE,
         exception_class=AssertFailure,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT(condition: bool, message: str = "", **context: Any) -> None:
@@ -365,13 +396,15 @@ def ASSERT(condition: bool, message: str = "", **context: Any) -> None:
         >>> ASSERT(user_id > 0, "Invalid user ID", user_id=user_id)
         >>> ASSERT(isinstance(data, dict), "Expected dict", got=type(data))
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=condition,
         message=message or "ASSERT failed",
         context=context,
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=AssertFailure,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ENSURE(condition: bool, message: str = "", **context: Any) -> None:
@@ -396,13 +429,15 @@ def ENSURE(condition: bool, message: str = "", **context: Any) -> None:
         ...     ENSURE(order.is_valid(), "Invalid order", order_id=order.id)
         ...     ENSURE(order.items, "Order has no items", order_id=order.id)
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=condition,
         message=message or "ENSURE failed",
         context=context,
         mode=AssertionMode.DEV_RAISE,
         exception_class=AssertFailure,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def VERIFY(condition: bool, message: str = "", **context: Any) -> None:
@@ -427,13 +462,15 @@ def VERIFY(condition: bool, message: str = "", **context: Any) -> None:
         >>> VERIFY(result >= 0, "Total cannot be negative", result=result)
         >>> return result
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=condition,
         message=message or "VERIFY failed",
         context=context,
         mode=AssertionMode.DEV_RAISE,
         exception_class=AssertFailure,
     )
+    if _exc is not None:
+        raise _exc
 
 
 # ========================================================================
@@ -456,13 +493,15 @@ def ASSERT_NOT_NULL(value: Any, message: str = "") -> None:
         >>> ASSERT_NOT_NULL(user, "User is required")
         >>> ASSERT_NOT_NULL(config.api_key, "API key not configured")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=value is not None,
         message=message or "Value must not be None",
         context={"value": value},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=NullError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_NULL(value: Any, message: str = "") -> None:
@@ -481,13 +520,15 @@ def ASSERT_NULL(value: Any, message: str = "") -> None:
     Example:
         >>> ASSERT_NULL(cache.get(key), "Cache should be empty")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=value is None,
         message=message or "Value must be None",
         context={"value": value},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=NullError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_EQUALS(actual: Any, expected: Any, message: str = "") -> None:
@@ -506,13 +547,15 @@ def ASSERT_EQUALS(actual: Any, expected: Any, message: str = "") -> None:
         >>> ASSERT_EQUALS(response.status, 200, "Expected success status")
         >>> ASSERT_EQUALS(len(items), 5, "Should have 5 items")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=actual == expected,
         message=message or f"Expected {expected!r}, got {actual!r}",
         context={"actual": actual, "expected": expected},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=EqualsError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_GREATER(a: Any, b: Any, message: str = "") -> None:
@@ -531,13 +574,15 @@ def ASSERT_GREATER(a: Any, b: Any, message: str = "") -> None:
         >>> ASSERT_GREATER(balance, 0, "Balance must be positive")
         >>> ASSERT_GREATER(end_date, start_date, "Invalid date range")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=a > b,
         message=message or f"{a} is not greater than {b}",
         context={"a": a, "b": b},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=ComparisonError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_LESS(a: Any, b: Any, message: str = "") -> None:
@@ -556,13 +601,15 @@ def ASSERT_LESS(a: Any, b: Any, message: str = "") -> None:
         >>> ASSERT_LESS(retry_count, max_retries, "Too many retries")
         >>> ASSERT_LESS(age, 150, "Invalid age")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=a < b,
         message=message or f"{a} is not less than {b}",
         context={"a": a, "b": b},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=ComparisonError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_IN_RANGE(
@@ -587,13 +634,15 @@ def ASSERT_IN_RANGE(
         >>> ASSERT_IN_RANGE(percentage, 0, 100, "Invalid percentage")
         >>> ASSERT_IN_RANGE(age, 18, 65, "Age out of valid range")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=min_value <= value <= max_value,
         message=message or f"{value} not in range [{min_value}, {max_value}]",
         context={"value": value, "min": min_value, "max": max_value},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=RangeError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_BETWEEN_EXCLUSIVE(
@@ -619,13 +668,15 @@ def ASSERT_BETWEEN_EXCLUSIVE(
     Example:
         >>> ASSERT_BETWEEN_EXCLUSIVE(ratio, 0.0, 1.0, "Ratio must be between 0 and 1")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=min_value < value < max_value,
         message=message or f"{value} not in exclusive range ({min_value}, {max_value})",
         context={"value": value, "min": min_value, "max": max_value},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=RangeError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_TYPE(value: Any, expected: type | tuple[type, ...], message: str = "") -> None:
@@ -644,13 +695,15 @@ def ASSERT_TYPE(value: Any, expected: type | tuple[type, ...], message: str = ""
         >>> ASSERT_TYPE(config, dict, "Config must be a dictionary")
         >>> ASSERT_TYPE(value, (int, float), "Expected numeric type")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=isinstance(value, expected),
         message=message or f"Expected type {expected}, got {type(value)}",
         context={"value": value, "expected": expected, "actual": type(value)},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=TypeErrorAssert,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_NOT_EMPTY(value: Any, message: str = "") -> None:
@@ -670,7 +723,7 @@ def ASSERT_NOT_EMPTY(value: Any, message: str = "") -> None:
         >>> ASSERT_NOT_EMPTY(users, "No users found")
         >>> ASSERT_NOT_EMPTY(name.strip(), "Name cannot be blank")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=bool(value),
         message=message or f"{type(value).__name__} is empty",
         context={
@@ -680,6 +733,8 @@ def ASSERT_NOT_EMPTY(value: Any, message: str = "") -> None:
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=EmptyError,
     )
+    if _exc is not None:
+        raise _exc
 
 
 def ASSERT_IN(item: Any, container: Any, message: str = "") -> None:
@@ -698,10 +753,12 @@ def ASSERT_IN(item: Any, container: Any, message: str = "") -> None:
         >>> ASSERT_IN(status, ["pending", "active", "completed"], "Invalid status")
         >>> ASSERT_IN(user_id, allowed_users, "User not authorized")
     """
-    AssertionManager._handle(
+    _exc = AssertionManager._handle(
         condition=item in container,
         message=message or f"{item!r} not found in container",
         context={"item": item, "container_type": type(container).__name__},
         mode=AssertionMode.DEBUG_ONLY,
         exception_class=MembershipError,
     )
+    if _exc is not None:
+        raise _exc
